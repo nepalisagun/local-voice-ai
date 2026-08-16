@@ -180,3 +180,97 @@ class TestCrashRecovery:
             assert sup.stopping, "supervisor did not enter stopping state"
         finally:
             await sup.shutdown(timeout=3.0)
+
+
+# A stub that starts healthy and starts returning 503 once a sentinel file
+# appears — the shape of a model process that is alive but can no longer serve.
+_FLIPPABLE_STUB = dedent(
+    """
+    import sys, os, http.server, socketserver
+    port = int(sys.argv[1]); flag = sys.argv[2]
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            if os.path.exists(flag):
+                self.send_response(503); self.end_headers(); self.wfile.write(b'degraded')
+            else:
+                self.send_response(200); self.end_headers(); self.wfile.write(b'ok')
+        def log_message(self, *a, **k): pass
+    class S(socketserver.TCPServer):
+        allow_reuse_address = True
+    with S(('127.0.0.1', port), H) as srv:
+        srv.serve_forever()
+    """
+).strip()
+
+
+class TestUnhealthyRestart:
+    """A child stuck unhealthy must be restarted even though it never exits.
+
+    This is the CUDA-OOM failure mode: the STT process keeps its socket open
+    and answers, but every inference fails, so _watch_exit never fires.
+    """
+
+    def _spec(self, port: int, flag: str) -> ChildSpec:
+        return ChildSpec(
+            name="flappy",
+            argv=[sys.executable, "-c", _FLIPPABLE_STUB, str(port), flag],
+            ready_url=f"http://127.0.0.1:{port}/",
+            ready_timeout=10.0,
+            max_restarts=3,
+            health_interval=0.25,
+            health_failures=2,
+        )
+
+    @pytest.mark.asyncio
+    async def test_unhealthy_child_is_terminated_and_restarted(self, tmp_path) -> None:
+        port = _free_port()
+        flag = str(tmp_path / "degraded")
+        sup = Supervisor([self._spec(port, flag)])
+        await sup.start_all()
+        try:
+            child = sup._children[0]
+            first_pid = child.process.pid
+
+            # Flip the stub unhealthy; the monitor should notice and recycle it.
+            open(flag, "w").close()
+            for _ in range(80):
+                await asyncio.sleep(0.25)
+                if child.process and child.process.pid != first_pid:
+                    break
+            assert child.process.pid != first_pid, "unhealthy child was not restarted"
+            assert child.restart_count >= 1
+        finally:
+            await sup.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_healthy_child_is_not_restarted(self, tmp_path) -> None:
+        # The monitor must not recycle a child that keeps answering, or every
+        # long-running service would be killed on a timer.
+        port = _free_port()
+        sup = Supervisor([self._spec(port, str(tmp_path / "never"))])
+        await sup.start_all()
+        try:
+            child = sup._children[0]
+            first_pid = child.process.pid
+            await asyncio.sleep(2.0)  # many health intervals
+            assert child.process.pid == first_pid
+            assert child.restart_count == 0
+        finally:
+            await sup.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_health_interval_zero_disables_monitor(self, tmp_path) -> None:
+        port = _free_port()
+        flag = str(tmp_path / "degraded")
+        spec = self._spec(port, flag)
+        spec.health_interval = 0
+        sup = Supervisor([spec])
+        await sup.start_all()
+        try:
+            child = sup._children[0]
+            first_pid = child.process.pid
+            open(flag, "w").close()
+            await asyncio.sleep(1.5)
+            assert child.process.pid == first_pid, "monitor ran despite being disabled"
+        finally:
+            await sup.shutdown()

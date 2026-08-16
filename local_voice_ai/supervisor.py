@@ -30,6 +30,12 @@ class ChildSpec:
     ready_url: str | None = None
     ready_timeout: float = 180.0
     max_restarts: int = 5
+    # Liveness polling of ready_url after the child comes up. A model process
+    # can keep its socket open while every inference fails (e.g. a CUDA OOM
+    # that corrupts the loaded model), which _watch_exit can never see because
+    # the process does not exit. 0 disables polling for this child.
+    health_interval: float = 30.0
+    health_failures: int = 3
 
 
 @dataclass
@@ -40,6 +46,7 @@ class _Child:
     ready: bool = False
     pump_task: asyncio.Task | None = None
     watch_task: asyncio.Task | None = None
+    health_task: asyncio.Task | None = None
 
 
 class Supervisor:
@@ -121,7 +128,7 @@ class Supervisor:
                 await child.process.wait()
 
         for child in self._children:
-            for task in (child.pump_task, child.watch_task):
+            for task in (child.pump_task, child.watch_task, child.health_task):
                 if task and not task.done():
                     task.cancel()
 
@@ -189,6 +196,7 @@ class Supervisor:
                 if resp.status_code < 400:
                     child.ready = True
                     logger.info("[%s] ready", child.spec.name)
+                    self._start_health_monitor(child)
                     return
             except (httpx.RequestError, httpx.HTTPError):
                 pass
@@ -201,6 +209,68 @@ class Supervisor:
                 )
             await asyncio.sleep(min(delay, deadline - now))
             delay = min(delay * 1.5, 5.0)
+
+    def _start_health_monitor(self, child: _Child) -> None:
+        """(Re)arm liveness polling for a child that just became ready."""
+        if child.spec.ready_url is None or child.spec.health_interval <= 0:
+            return
+        if child.health_task and not child.health_task.done():
+            child.health_task.cancel()
+        child.health_task = asyncio.create_task(
+            self._monitor_health(child), name=f"health:{child.spec.name}"
+        )
+
+    async def _monitor_health(self, child: _Child) -> None:
+        """Terminate a child that is running but no longer serving.
+
+        Killing it rather than restarting it here is deliberate: the process
+        exit wakes _watch_exit, which already owns backoff and the restart
+        budget, so a wedged child and a crashed one follow one code path.
+        """
+        assert self._http is not None
+        failures = 0
+
+        while not self.stopping:
+            await asyncio.sleep(child.spec.health_interval)
+            if self.stopping or not child.ready:
+                return
+            process = child.process
+            if process is None or process.returncode is not None:
+                return  # already exited; _watch_exit is handling it
+
+            try:
+                resp = await self._http.get(child.spec.ready_url)
+                healthy = resp.status_code < 400
+                detail = f"HTTP {resp.status_code}"
+            except (httpx.RequestError, httpx.HTTPError) as exc:
+                healthy = False
+                detail = str(exc) or type(exc).__name__
+
+            if healthy:
+                failures = 0
+                continue
+
+            failures += 1
+            logger.warning(
+                "[%s] health probe failed (%d/%d): %s",
+                child.spec.name,
+                failures,
+                child.spec.health_failures,
+                detail,
+            )
+            if failures >= child.spec.health_failures:
+                logger.error(
+                    "[%s] unhealthy but still running; terminating for restart",
+                    child.spec.name,
+                )
+                # Leave child.ready set: _watch_exit skips restarting a child
+                # that never became ready, so clearing it here would make the
+                # terminate a silent kill. _watch_exit clears it itself.
+                try:
+                    process.terminate()
+                except ProcessLookupError:
+                    pass
+                return
 
     async def _watch_exit(self, child: _Child) -> None:
         assert child.process is not None

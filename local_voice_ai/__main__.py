@@ -18,9 +18,10 @@ import sys
 from pathlib import Path
 
 import uvicorn
+from dotenv import load_dotenv
 
 from .api import build_app
-from .config import Config
+from .config import Config, probe_host
 from .supervisor import ChildSpec, Supervisor, configure_logging
 
 logger = logging.getLogger("main")
@@ -171,9 +172,15 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
     # --- llama.cpp server (C++ binary) -------------------------------
     if cfg.manage_llama:
         llama_bin = os.getenv("LLAMA_BIN", "llama-server")
+        # The image sets HF_HOME/XDG_CACHE_HOME=/models (a mounted volume), so
+        # those win inside the container. A bare-metal run has no writable
+        # /models, and llama-server reports the failed download as a bare
+        # "failed to load model ''" — so fall back to the user's cache. HF_HOME
+        # is derived from XDG_CACHE_HOME so both stay in one tree.
+        xdg_cache = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
         llama_env = {
-            "HF_HOME": os.getenv("HF_HOME", "/models"),
-            "XDG_CACHE_HOME": os.getenv("XDG_CACHE_HOME", "/models"),
+            "HF_HOME": os.getenv("HF_HOME", os.path.join(xdg_cache, "huggingface")),
+            "XDG_CACHE_HOME": xdg_cache,
         }
         # A local .gguf path loads directly (no Hugging Face lookup); otherwise
         # resolve from the HF repo. --offline forces cache-only startup so a
@@ -198,7 +205,7 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                 name="llama",
                 argv=[
                     llama_bin,
-                    "--host", "127.0.0.1",
+                    "--host", cfg.llama_bind_host,
                     "--port", str(cfg.llama_bind_port),
                     *model_argv,
                     *(["--offline"] if offline else []),
@@ -211,7 +218,7 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                     "--reasoning", "off",
                 ],
                 env=llama_env,
-                ready_url=f"http://127.0.0.1:{cfg.llama_bind_port}/v1/models",
+                ready_url=f"http://{probe_host(cfg.llama_bind_host)}:{cfg.llama_bind_port}/v1/models",
                 ready_timeout=900.0,  # first-run model download can be slow
             )
         )
@@ -224,14 +231,14 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                     name="whisper",
                     argv=[
                         py, "-m", "local_voice_ai.services.whisper.server",
-                        "--host", "127.0.0.1",
+                        "--host", cfg.stt_bind_host,
                         "--port", str(cfg.stt_bind_port),
                     ],
                     env={
                         "WHISPER_MODEL": cfg.whisper_model,
                         "DEVICE": cfg.device,
                     },
-                    ready_url=f"http://127.0.0.1:{cfg.stt_bind_port}/health",
+                    ready_url=f"http://{probe_host(cfg.stt_bind_host)}:{cfg.stt_bind_port}/health",
                     ready_timeout=600.0,
                 )
             )
@@ -241,15 +248,17 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                     name="nemotron",
                     argv=[
                         py, "-m", "local_voice_ai.services.nemotron.server",
-                        "--host", "127.0.0.1",
+                        "--host", cfg.stt_bind_host,
                         "--port", str(cfg.stt_bind_port),
                     ],
                     env={
                         "NEMOTRON_MODEL_NAME": cfg.nemotron_model_name,
                         "NEMOTRON_MODEL_ID": cfg.nemotron_model_id,
+                        "NEMOTRON_FP16": "1" if cfg.nemotron_fp16 else "0",
+                        "NEMOTRON_ITN": "1" if cfg.nemotron_itn else "0",
                         "PYTORCH_ENABLE_MPS_FALLBACK": "1",
                     },
-                    ready_url=f"http://127.0.0.1:{cfg.stt_bind_port}/health",
+                    ready_url=f"http://{probe_host(cfg.stt_bind_host)}:{cfg.stt_bind_port}/health",
                     ready_timeout=600.0,
                 )
             )
@@ -261,10 +270,10 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                 name="kokoro",
                 argv=[
                     py, "-m", "local_voice_ai.services.kokoro.server",
-                    "--host", "127.0.0.1",
+                    "--host", cfg.tts_bind_host,
                     "--port", str(cfg.tts_bind_port),
                 ],
-                ready_url=f"http://127.0.0.1:{cfg.tts_bind_port}/v1/models",
+                ready_url=f"http://{probe_host(cfg.tts_bind_host)}:{cfg.tts_bind_port}/v1/models",
                 ready_timeout=600.0,
             )
         )
@@ -396,6 +405,25 @@ def _download_models(cfg: Config) -> int:
     return 0
 
 
+def _load_env_files() -> None:
+    """Load ``.env.local`` then ``.env`` into the environment.
+
+    Under Docker, compose injects these via ``env_file:`` and this is a no-op.
+    On a bare-metal run nothing read them at all, so the documented settings
+    silently did nothing unless you exported them by hand.
+
+    Precedence is real env > ``.env.local`` > ``.env``: ``override=False`` means
+    the first value wins, so an explicit ``FOO=bar python -m ...`` still beats
+    both files, and ``.env.local`` (untracked, per-machine) beats the committed
+    defaults. Values reach the children through the inherited environment, so
+    llama.cpp's own ``LLAMA_ARG_*`` vars work here too.
+    """
+    for name in (".env.local", ".env"):
+        path = Path(name)
+        if path.is_file():
+            load_dotenv(path, override=False)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="local_voice_ai")
     sub = parser.add_subparsers(dest="cmd")
@@ -404,6 +432,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("console", help="run the agent in interactive console mode")
 
     args = parser.parse_args(argv)
+    _load_env_files()
     cfg = Config.from_env()
     configure_logging(cfg.log_level)
 

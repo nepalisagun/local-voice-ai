@@ -71,16 +71,46 @@ The supervisor logs which children it manages on startup.
 
 ## Local development (no Docker)
 
-Requires Python 3.11+, plus the `livekit-server` and `llama-server` binaries on
-your PATH (macOS: `brew install livekit llama.cpp`).
+Requires Python 3.11–3.13 (3.14 is not usable yet: NeMo's `kaldialign` dep ships
+no cp314 wheel and no sdist — `.python-version` pins 3.13), plus the
+`livekit-server` and `llama-server` binaries on your PATH
+(macOS: `brew install livekit llama.cpp`).
+
+On Linux there is no `livekit-server`/`llama-server` package — grab the
+[LiveKit release](https://github.com/livekit/livekit/releases) tarball, and for
+llama.cpp either take a [prebuilt Linux
+binary](https://github.com/ggml-org/llama.cpp/releases) (the `ubuntu-x64` /
+`ubuntu-vulkan-x64` tarballs) or build it yourself. There is no prebuilt Linux
+CUDA binary — NVIDIA users who want CUDA have to compile:
 
 ```bash
-# Python side
-uv pip install -e ".[ml,dev]"
-python -m local_voice_ai serve
+cmake -B build -DGGML_CUDA=ON -DLLAMA_CURL=ON -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_CUDA_ARCHITECTURES=89 -DCMAKE_INSTALL_PREFIX=$HOME/.local
+cmake --build build -j && cmake --install build
+```
+
+Set `CMAKE_CUDA_ARCHITECTURES` to your GPU (89 = Ada / RTX 40xx). `LLAMA_CURL=ON`
+needs `libcurl4-openssl-dev` and is required — the supervisor starts llama-server
+with `--hf-repo`. If CUDA rejects your system compiler, add
+`-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-13`.
+
+```bash
+# Python side — uv sync installs from uv.lock into ./.venv
+uv sync --extra ml --extra dev
+
+# Prefetch the turn-detector / VAD models (the image does this at build time)
+.venv/bin/python -m local_voice_ai.agent download-files
+
+.venv/bin/python -m local_voice_ai serve
 
 # Frontend side, in another shell (only needed if you're editing the UI)
 cd frontend && pnpm install && pnpm run dev
+```
+
+To use an NVIDIA GPU, mirror what `docker-compose.gpu.yml` sets:
+
+```bash
+LLAMA_N_GPU_LAYERS=999 DEVICE=cuda .venv/bin/python -m local_voice_ai serve
 ```
 
 ## Architecture
@@ -127,6 +157,16 @@ cd frontend && pnpm install && pnpm run dev
 
 ## Environment variables
 
+`serve` loads `.env.local` then `.env` from the working directory, so settings
+apply to bare-metal runs as well as Docker. Precedence is real env > `.env.local`
+> `.env`, so `FOO=bar python -m local_voice_ai serve` still wins over both.
+
+Put per-machine choices (model, GPU settings) in **`.env.local`** — it's
+gitignored, so it won't change the committed defaults or the CPU compose path.
+Because children inherit the environment, llama.cpp's own `LLAMA_ARG_*` variables
+work there too — e.g. `LLAMA_ARG_CPU_MOE=1` keeps a MoE model's expert weights on
+the CPU, which is what makes a 26B-A4B fit alongside STT on a 12 GB card.
+
 See `.env` for the full list. The most important ones:
 
 - `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` — local-default; override for cloud.
@@ -137,6 +177,75 @@ See `.env` for the full list. The most important ones:
 - `TTS_BASE_URL`, `TTS_VOICE`
 - `WEB_PORT` (default `8080`)
 - `MANAGE_LIVEKIT`, `MANAGE_LLAMA`, `MANAGE_STT`, `MANAGE_TTS` — explicit overrides for the auto-detected "is the URL external?" logic.
+- `GATEWAY=1` — serve the OpenAI-compatible `/v1/*` API on the web port, proxied to the LLM/STT/TTS children. Off by default. See below.
+- `BIND_HOST` — where the managed LLM/STT/TTS children listen. Defaults to `127.0.0.1`, so they're loopback-only. See below.
+
+## Serving the LLM / STT endpoints on your network
+
+llama.cpp, the STT server, and Kokoro each expose an OpenAI-compatible API, but
+all three bind `127.0.0.1`, so nothing else on the network can reach them. There
+are two ways to open that up.
+
+### Recommended: the gateway
+
+`GATEWAY=1` puts the whole `/v1/*` surface on the web port (`8080`), proxied to
+whichever child owns each route:
+
+```bash
+GATEWAY=1 .venv/bin/python -m local_voice_ai serve
+```
+
+One base URL — `http://<host>:8080/v1` — serves chat, transcription and speech.
+The children stay on loopback, and `8080` is already published by
+`docker-compose.yml`, so this needs no `BIND_HOST` and no new port mappings.
+
+| Route | Goes to |
+|---|---|
+| `/v1/models` | union of all three listings, each tagged with a `backend` field |
+| `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings` | LLM |
+| `/v1/audio/transcriptions`, `/v1/audio/translations` | STT |
+| `/v1/audio/speech` | TTS |
+
+Streaming is passed through chunk by chunk, so SSE tokens arrive as they're
+generated. A backend that's still warming up returns `502` and is omitted from
+`/v1/models` rather than failing the whole listing. Any API key works; nothing
+is checked.
+
+### Alternative: bind the children directly
+
+To skip the proxy and expose each service on its own port, set `BIND_HOST`:
+
+```bash
+BIND_HOST=0.0.0.0 .venv/bin/python -m local_voice_ai serve
+```
+
+Per-service `LLAMA_BIND_HOST`, `STT_BIND_HOST`, and `TTS_BIND_HOST` override it
+individually — e.g. expose the LLM but keep TTS local:
+
+```bash
+BIND_HOST=0.0.0.0 TTS_BIND_HOST=127.0.0.1 .venv/bin/python -m local_voice_ai serve
+```
+
+Use `0.0.0.0` for every interface, or a specific NIC address to pick one. Then
+point any OpenAI client at the box:
+
+| Service | Endpoint |
+|---|---|
+| LLM | `http://<host>:11434/v1` — model `gemma-4-e2b` |
+| STT | `http://<host>:8000/v1` — `POST /v1/audio/transcriptions` |
+| TTS | `http://<host>:8880/v1` — `POST /v1/audio/speech` |
+
+Any API key works; the servers don't check one.
+
+Under Docker this also needs the ports published: compose maps only 8080/7880/7881/7882,
+so add `11434:11434` and `8000:8000` to the `ports:` list alongside `BIND_HOST=0.0.0.0`.
+
+> **Neither route adds authentication.** llama-server also runs with `CORS: *`.
+> Anyone who can reach the host gets free inference on your GPU. Note the web
+> port already defaults to `0.0.0.0`, so `GATEWAY=1` alone publishes inference to
+> whatever network that port is reachable from — which is why it's opt-in. Only
+> enable either on a network you trust, never on a public interface. Put a
+> reverse proxy with auth in front if you need more than that.
 
 ## Credits
 

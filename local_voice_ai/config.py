@@ -33,6 +33,17 @@ def _env_bool_opt(name: str) -> Optional[bool]:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+_DEFAULT_BIND_HOST = "127.0.0.1"
+
+# Wildcard binds aren't connectable addresses — probe readiness over loopback.
+_WILDCARD_HOSTS = {"0.0.0.0", "::", ""}
+
+
+def probe_host(bind_host: str) -> str:
+    """The address to reach a child that is listening on ``bind_host``."""
+    return "127.0.0.1" if bind_host in _WILDCARD_HOSTS else bind_host
+
+
 def _is_loopback(url: str) -> bool:
     """Return True if ``url`` points at the local machine."""
     try:
@@ -48,6 +59,12 @@ class Config:
     web_host: str = "0.0.0.0"
     web_port: int = 8080
     frontend_dir: Optional[str] = None  # path to a Next.js static export dir
+    # Expose the OpenAI-compatible /v1/* surface on the web port, proxied to the
+    # LLM/STT/TTS children, so one URL serves everything and the children can
+    # stay on loopback. Off by default: web_host is already 0.0.0.0 and the
+    # backends have no auth, so enabling this publishes unauthenticated
+    # inference to whatever network the web port is reachable from.
+    gateway: bool = False
 
     # --- LiveKit ---------------------------------------------------------
     livekit_url: str = "ws://127.0.0.1:7880"
@@ -83,6 +100,7 @@ class Config:
     llama_ctx_size: int = 16384
     llama_n_gpu_layers: int = 0
     llama_bind_port: int = 11434
+    llama_bind_host: str = _DEFAULT_BIND_HOST
     manage_llama: bool = True
 
     # --- STT (Nemotron by default) --------------------------------------
@@ -91,20 +109,28 @@ class Config:
     stt_model: str = "nemotron-speech-streaming"
     stt_api_key: str = "no-key-needed"
     stt_bind_port: int = 8000
+    stt_bind_host: str = _DEFAULT_BIND_HOST
     manage_stt: bool = True
 
     # Nemotron-specific
     nemotron_model_name: str = "nvidia/nemotron-speech-streaming-en-0.6b"
     nemotron_model_id: str = "nemotron-speech-streaming"
+    # fp16 halves the weights with no measured transcript change on GPU.
+    nemotron_fp16: bool = True
+    # Nemotron transcribes numbers verbatim ("four one five..."); normalise
+    # them to digits the way whisper already does internally.
+    nemotron_itn: bool = True
 
     # Whisper (faster-whisper) specific
     whisper_model: str = "Systran/faster-whisper-small"
+
 
     # --- TTS (Kokoro) ---------------------------------------------------
     tts_base_url: str = "http://127.0.0.1:8880/v1"
     tts_voice: str = "af_nova"
     tts_api_key: str = "no-key-needed"
     tts_bind_port: int = 8880
+    tts_bind_host: str = _DEFAULT_BIND_HOST
     manage_tts: bool = True
 
     # --- Wake word (off by default) --------------------------------------
@@ -123,6 +149,12 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         """Build the config from ``os.environ`` with sane defaults."""
+        # Managed inference children listen on loopback, so nothing is reachable
+        # off-box by default. BIND_HOST widens all three at once (0.0.0.0 for the
+        # whole LAN, or a specific NIC address to pick one interface); the
+        # per-service *_BIND_HOST vars override it individually. These endpoints
+        # have no auth — only widen this on a network you trust.
+        bind_host = os.getenv("BIND_HOST", _DEFAULT_BIND_HOST)
         livekit_url = os.getenv("LIVEKIT_URL", cls.livekit_url)
         llama_base_url = os.getenv("LLAMA_BASE_URL", cls.llama_base_url)
         stt_base_url = os.getenv("STT_BASE_URL")
@@ -147,6 +179,7 @@ class Config:
             web_host=os.getenv("WEB_HOST", cls.web_host),
             web_port=int(os.getenv("WEB_PORT", str(cls.web_port))),
             frontend_dir=os.getenv("FRONTEND_DIR"),
+            gateway=_env_bool("GATEWAY", cls.gateway),
             #
             livekit_url=livekit_url,
             livekit_api_key=os.getenv("LIVEKIT_API_KEY", cls.livekit_api_key),
@@ -167,6 +200,7 @@ class Config:
             llama_ctx_size=int(os.getenv("LLAMA_CTX_SIZE", str(cls.llama_ctx_size))),
             llama_n_gpu_layers=int(os.getenv("LLAMA_N_GPU_LAYERS", str(cls.llama_n_gpu_layers))),
             llama_bind_port=int(os.getenv("LLAMA_BIND_PORT", str(cls.llama_bind_port))),
+            llama_bind_host=os.getenv("LLAMA_BIND_HOST", bind_host),
             manage_llama=_env_bool("MANAGE_LLAMA", _is_loopback(llama_base_url)),
             #
             stt_provider=stt_provider,
@@ -174,9 +208,12 @@ class Config:
             stt_model=os.getenv("STT_MODEL", default_stt_model),
             stt_api_key=os.getenv("STT_API_KEY", cls.stt_api_key),
             stt_bind_port=int(os.getenv("STT_BIND_PORT", str(cls.stt_bind_port))),
+            stt_bind_host=os.getenv("STT_BIND_HOST", bind_host),
             manage_stt=_env_bool("MANAGE_STT", _is_loopback(stt_base_url)),
             nemotron_model_name=os.getenv("NEMOTRON_MODEL_NAME", cls.nemotron_model_name),
             nemotron_model_id=os.getenv("NEMOTRON_MODEL_ID", cls.nemotron_model_id),
+            nemotron_fp16=_env_bool("NEMOTRON_FP16", cls.nemotron_fp16),
+            nemotron_itn=_env_bool("NEMOTRON_ITN", cls.nemotron_itn),
             whisper_model=os.getenv("WHISPER_MODEL", cls.whisper_model),
             #
             wake_word=_env_bool("WAKE_WORD", cls.wake_word),
@@ -189,6 +226,7 @@ class Config:
             tts_voice=os.getenv("TTS_VOICE", cls.tts_voice),
             tts_api_key=os.getenv("TTS_API_KEY", cls.tts_api_key),
             tts_bind_port=int(os.getenv("TTS_BIND_PORT", str(cls.tts_bind_port))),
+            tts_bind_host=os.getenv("TTS_BIND_HOST", bind_host),
             manage_tts=_env_bool("MANAGE_TTS", _is_loopback(tts_base_url)),
             #
             device=os.getenv("DEVICE", cls.device).lower(),

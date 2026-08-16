@@ -2,6 +2,9 @@ venv/
 .venv/
 inference/llama/models/
 
+# Per-machine env overrides (model choice, GPU settings). .env stays tracked.
+.env.local
+
 # Python cache artifacts
 **/__pycache__/
 *.pyc

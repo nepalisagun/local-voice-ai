@@ -27,6 +27,7 @@ from local_voice_ai.__main__ import (
     _hf_hub_dir,
     _llama_cache_dir,
     _llama_repo_cached,
+    _load_env_files,
     _serve,
     _startup_line,
     make_status_provider,
@@ -345,3 +346,89 @@ class TestWhisperSpec:
         cfg = Config.from_env()
         names = [s.name for s in _build_specs(cfg)]
         assert "nemotron" in names and "whisper" not in names
+
+
+class TestBindHost:
+    """Inference children bind loopback unless explicitly widened."""
+
+    def _hosts(self) -> dict[str, str]:
+        cfg = Config.from_env()
+        specs = _build_specs(cfg)
+        return {
+            s.name: s.argv[s.argv.index("--host") + 1]
+            for s in specs
+            if "--host" in s.argv
+        }
+
+    def test_defaults_to_loopback(self) -> None:
+        hosts = self._hosts()
+        assert hosts["llama"] == "127.0.0.1"
+        assert hosts["nemotron"] == "127.0.0.1"
+        assert hosts["kokoro"] == "127.0.0.1"
+
+    def test_bind_host_widens_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BIND_HOST", "0.0.0.0")
+        assert set(self._hosts().values()) == {"0.0.0.0"}
+
+    def test_per_service_overrides_global(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BIND_HOST", "0.0.0.0")
+        monkeypatch.setenv("TTS_BIND_HOST", "127.0.0.1")
+        hosts = self._hosts()
+        assert hosts["llama"] == "0.0.0.0"
+        assert hosts["nemotron"] == "0.0.0.0"
+        assert hosts["kokoro"] == "127.0.0.1"  # TTS stays local
+
+    def test_wildcard_bind_probes_over_loopback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 0.0.0.0 is not a connectable address, so readiness must use loopback.
+        monkeypatch.setenv("BIND_HOST", "0.0.0.0")
+        specs = _build_specs(Config.from_env())
+        for spec in specs:
+            if spec.ready_url:
+                assert "0.0.0.0" not in spec.ready_url
+
+    def test_specific_address_is_probed_directly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLAMA_BIND_HOST", "192.168.1.50")
+        spec = _llama_spec()
+        assert spec.ready_url == "http://192.168.1.50:11434/v1/models"
+
+
+class TestEnvFileLoading:
+    """Bare-metal runs never read .env — only Docker did, via compose's
+    env_file. These cover the precedence that makes local overrides work."""
+
+    def test_env_file_is_loaded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("LLAMA_MODEL=from-env\n")
+        monkeypatch.delenv("LLAMA_MODEL", raising=False)
+        _load_env_files()
+        assert os.environ["LLAMA_MODEL"] == "from-env"
+
+    def test_env_local_beats_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("LLAMA_MODEL=from-env\n")
+        (tmp_path / ".env.local").write_text("LLAMA_MODEL=from-local\n")
+        monkeypatch.delenv("LLAMA_MODEL", raising=False)
+        _load_env_files()
+        assert os.environ["LLAMA_MODEL"] == "from-local"
+
+    def test_real_env_beats_both_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # An explicit `FOO=bar python -m local_voice_ai serve` must still win,
+        # or every one-off override on the command line would be ignored.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("LLAMA_MODEL=from-env\n")
+        (tmp_path / ".env.local").write_text("LLAMA_MODEL=from-local\n")
+        monkeypatch.setenv("LLAMA_MODEL", "from-shell")
+        _load_env_files()
+        assert os.environ["LLAMA_MODEL"] == "from-shell"
+
+    def test_missing_files_are_not_an_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _load_env_files()  # no .env or .env.local present

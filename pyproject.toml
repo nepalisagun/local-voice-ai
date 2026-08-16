@@ -27,6 +27,8 @@ dependencies = [
     "numpy",
     "soundfile",
     "python-multipart",
+    # Spoken-number normalisation for STT output (see local_voice_ai/textnorm).
+    "text2num",
 ]
 
 [project.optional-dependencies]
