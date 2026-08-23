@@ -4,6 +4,8 @@ inference/llama/models/
 
 # Per-machine env overrides (model choice, GPU settings). .env stays tracked.
 .env.local
+.local-voice-ai.toml
+.local-voice-ai.toml.tmp
 
 # Python cache artifacts
 **/__pycache__/

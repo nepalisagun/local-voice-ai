@@ -16,6 +16,12 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
       STT_PROVIDER: ${STT_PROVIDER:-nemotron}
+      STT_MODEL: ${STT_MODEL:-nemotron-speech-streaming}
+      NEMOTRON_MODEL_NAME: ${NEMOTRON_MODEL_NAME:-nvidia/nemotron-speech-streaming-en-0.6b}
+      NEMOTRON_MODEL_ID: ${NEMOTRON_MODEL_ID:-nemotron-speech-streaming}
+      NEMOTRON_FP16: ${NEMOTRON_FP16:-1}
+      WHISPER_MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-small}
+      TTS_VOICE: ${TTS_VOICE:-af_nova}
       WAKE_WORD: ${WAKE_WORD:-}
       WAKE_WORD_THRESHOLD: ${WAKE_WORD_THRESHOLD:-0.5}
       LLAMA_HF_REPO: ${LLAMA_HF_REPO:-unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL}

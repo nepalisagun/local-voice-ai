@@ -1,0 +1,93 @@
+[models.compact]
+rank = 10
+label = "Compact (under 6 GB)"
+description = "The default voice stack with a smaller context window and conservative headroom."
+minimum_budget_gib = 5.0
+target_memory_gib = 5.5
+download_gib = 4.2
+llm = "Gemma 4 E2B QAT Q4"
+stt = "Nemotron Speech 0.6B FP16"
+tts = "Kokoro 82M"
+
+[models.compact.environment]
+LLAMA_MODEL = "gemma-4-e2b"
+LLAMA_MODEL_ALIAS = "gemma-4-e2b"
+LLAMA_HF_REPO = "unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+LLAMA_CTX_SIZE = "4096"
+STT_PROVIDER = "nemotron"
+STT_MODEL = "nemotron-speech-streaming"
+NEMOTRON_MODEL_NAME = "nvidia/nemotron-speech-streaming-en-0.6b"
+NEMOTRON_FP16 = "1"
+
+[models.balanced]
+rank = 20
+label = "Balanced (larger context)"
+description = "The same proven models with a 16K context window for longer conversations."
+minimum_budget_gib = 6.5
+target_memory_gib = 6.5
+download_gib = 4.2
+llm = "Gemma 4 E2B QAT Q4"
+stt = "Nemotron Speech 0.6B FP16"
+tts = "Kokoro 82M"
+
+[models.balanced.environment]
+LLAMA_MODEL = "gemma-4-e2b"
+LLAMA_MODEL_ALIAS = "gemma-4-e2b"
+LLAMA_HF_REPO = "unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL"
+LLAMA_CTX_SIZE = "16384"
+STT_PROVIDER = "nemotron"
+STT_MODEL = "nemotron-speech-streaming"
+NEMOTRON_MODEL_NAME = "nvidia/nemotron-speech-streaming-en-0.6b"
+NEMOTRON_FP16 = "1"
+
+[platforms.linux-cpu]
+label = "CPU"
+description = "Portable CPU mode. Compact is preferred because latency matters for voice."
+runtime = "docker"
+compose_files = ["docker-compose.yml"]
+max_profile = "compact"
+
+[platforms.linux-cpu.environment]
+DEVICE = "cpu"
+LLAMA_N_GPU_LAYERS = "0"
+
+[platforms.nvidia-cuda]
+label = "NVIDIA CUDA"
+description = "Desktop NVIDIA GPU using the CUDA Compose image."
+runtime = "docker"
+compose_files = ["docker-compose.yml", "docker-compose.gpu.yml"]
+
+[platforms.nvidia-cuda.environment]
+DEVICE = "cuda"
+LLAMA_N_GPU_LAYERS = "999"
+
+[platforms.apple-silicon]
+label = "Apple Silicon / Metal"
+description = "Native execution so llama.cpp can use Metal and unified memory."
+runtime = "native"
+compose_files = []
+
+[platforms.apple-silicon.environment]
+DEVICE = "mps"
+LLAMA_N_GPU_LAYERS = "999"
+
+[platforms.jetson-orin-nano]
+label = "Jetson Orin Nano"
+description = "Native JetPack execution using the device's unified CPU/GPU memory."
+runtime = "native"
+compose_files = []
+max_profile = "compact"
+
+[platforms.jetson-orin-nano.environment]
+DEVICE = "cuda"
+LLAMA_N_GPU_LAYERS = "999"
+
+[platforms.jetson]
+label = "NVIDIA Jetson"
+description = "Native JetPack execution using the device's unified CPU/GPU memory."
+runtime = "native"
+compose_files = []
+
+[platforms.jetson.environment]
+DEVICE = "cuda"
+LLAMA_N_GPU_LAYERS = "999"

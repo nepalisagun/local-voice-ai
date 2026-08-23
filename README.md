@@ -21,7 +21,61 @@ Children speak HTTP only over `127.0.0.1`. The image exposes four ports: `8080` 
 
 ## Getting started
 
-Run the prebuilt image (amd64 + arm64):
+From a source checkout, the recommended entry point is the hardware-aware
+launcher. It uses only the Python standard library, so it can inspect the
+machine and show the model plan before it installs dependencies or downloads
+weights:
+
+```bash
+python3 run.py
+```
+
+On the first run it detects Apple Silicon, a desktop NVIDIA GPU, Jetson, or CPU;
+accounts for unified versus discrete memory; and recommends a model profile.
+Press Enter to accept, or choose a different profile or memory budget. The
+choice is saved in the gitignored `.local-voice-ai.toml`, so later starts do not
+repeat the questions.
+
+```bash
+python3 run.py configure                         # revisit the setup screen
+python3 run.py plan                              # inspect without starting
+python3 run.py start --profile auto --yes        # non-interactive auto selection
+python3 run.py start --profile compact --memory-gb 5.5 --yes
+python3 run.py status
+python3 run.py logs
+python3 run.py down
+```
+
+The initial catalog has two conservative variants of the proven v2 stack:
+
+| Profile | Planning target | Configuration |
+|---|---:|---|
+| `compact` | about 5.5 GB | Gemma 4 E2B Q4 + Nemotron 0.6B FP16 + Kokoro, 4K context |
+| `balanced` | about 6.5 GB | Same models with a 16K context |
+
+These numbers are planning targets, not hard limits; allocator, driver, and
+conversation state add workload-dependent overhead. Auto selection reserves
+25% (at least 2 GB) on unified-memory systems and 8% on discrete GPUs. CPU and
+Jetson Orin Nano are capped at `compact` for latency and system headroom.
+
+The model and platform definitions live in
+`local_voice_ai/profiles.toml`. Platform profiles decide the runtime and device;
+model profiles decide weights, context, and estimated memory. Shell variables
+and `.env.local` still override profile values.
+
+### Jetson
+
+Jetson is detected separately from a desktop NVIDIA GPU because its GPU shares
+system RAM and its PyTorch build must match JetPack. The launcher chooses the
+native JetPack path and verifies CUDA-enabled PyTorch, `llama-server`, and
+`livekit-server` before starting. It deliberately does not apply the desktop
+`docker-compose.gpu.yml` image to Jetson. A fully automated JetPack container is
+still needed; until then, provision the native dependencies for the installed
+JetPack release first.
+
+### Direct container run
+
+To bypass the launcher, run the prebuilt CPU image directly (amd64 + arm64):
 
 ```bash
 docker run --rm -it \
@@ -137,6 +191,9 @@ LLAMA_N_GPU_LAYERS=999 DEVICE=cuda .venv/bin/python -m local_voice_ai serve
 .
 ├─ local_voice_ai/         # Python package: supervisor + agent + services
 │  ├─ __main__.py          # python -m local_voice_ai serve
+│  ├─ profiles.py          # hardware detection + profile resolution
+│  ├─ profiles.toml        # model and platform profile catalog
+│  ├─ launcher.py          # dependency-free terminal setup presentation
 │  ├─ supervisor.py        # async process supervisor
 │  ├─ config.py            # env-driven config + manage-X flags
 │  ├─ api.py               # FastAPI: token route, status, static frontend
@@ -148,6 +205,7 @@ LLAMA_N_GPU_LAYERS=999 DEVICE=cuda .venv/bin/python -m local_voice_ai serve
 │     └─ kokoro/server.py
 ├─ frontend/               # Next.js (configured for static export)
 ├─ tests/                  # pytest suite
+├─ run.py                  # first-run wizard + start/status/log controls
 ├─ Dockerfile              # multi-stage build
 ├─ docker-compose.yml      # one service (CPU default)
 ├─ docker-compose.gpu.yml  # NVIDIA overlay: CUDA build + GPU reservation
@@ -166,6 +224,10 @@ gitignored, so it won't change the committed defaults or the CPU compose path.
 Because children inherit the environment, llama.cpp's own `LLAMA_ARG_*` variables
 work there too — e.g. `LLAMA_ARG_CPU_MOE=1` keeps a MoE model's expert weights on
 the CPU, which is what makes a 26B-A4B fit alongside STT on a 12 GB card.
+
+When starting through `run.py`, precedence is shell environment > `.env.local`
+> selected profile > committed defaults. The launcher reports any values that
+override its selected profile before startup.
 
 See `.env` for the full list. The most important ones:
 
