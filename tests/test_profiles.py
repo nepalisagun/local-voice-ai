@@ -140,6 +140,7 @@ class TestProfileResolution:
             "http://127.0.0.1:11435/v1"
         )
         assert resolved.environment["JETSON_LLAMA_BIND_PORT"] == "11435"
+        assert resolved.environment["SEQUENTIAL_STARTUP"] == "1"
         assert resolved.platform.runtime == "docker"
         assert resolved.platform.compose_files == (
             "docker-compose.yml",

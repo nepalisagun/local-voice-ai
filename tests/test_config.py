@@ -50,6 +50,15 @@ class TestManageDefaults:
         assert cfg.manage_stt
         assert cfg.manage_tts
 
+    def test_sequential_startup_is_opt_in(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SEQUENTIAL_STARTUP", raising=False)
+        assert Config.from_env().sequential_startup is False
+
+        monkeypatch.setenv("SEQUENTIAL_STARTUP", "1")
+        assert Config.from_env().sequential_startup is True
+
     def test_external_livekit_disables_management(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("LIVEKIT_URL", "wss://my-project.livekit.cloud")
         cfg = Config.from_env()

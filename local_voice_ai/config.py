@@ -144,6 +144,9 @@ class Config:
     device: str = "cpu"  # cpu | cuda | mps
 
     # --- Misc -----------------------------------------------------------
+    # Load managed children one at a time. This reduces temporary memory peaks
+    # on small unified-memory devices such as Jetson Orin Nano.
+    sequential_startup: bool = False
     log_level: str = "INFO"
 
     @classmethod
@@ -230,6 +233,9 @@ class Config:
             manage_tts=_env_bool("MANAGE_TTS", _is_loopback(tts_base_url)),
             #
             device=os.getenv("DEVICE", cls.device).lower(),
+            sequential_startup=_env_bool(
+                "SEQUENTIAL_STARTUP", cls.sequential_startup
+            ),
             log_level=os.getenv("LOG_LEVEL", cls.log_level).upper(),
         )
 

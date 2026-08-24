@@ -73,6 +73,38 @@ class TestSpawnAndReady:
             await sup.shutdown(timeout=3.0)
 
     @pytest.mark.asyncio
+    async def test_sequential_startup_waits_before_starting_next_child(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        specs = [
+            ChildSpec(name="first", argv=["first"]),
+            ChildSpec(name="second", argv=["second"]),
+        ]
+        sup = Supervisor(specs, sequential_startup=True)
+        events: list[str] = []
+
+        async def record_start(child) -> None:
+            events.append(f"start:{child.spec.name}")
+
+        async def record_ready(child) -> None:
+            events.append(f"ready:{child.spec.name}")
+
+        monkeypatch.setattr(sup, "_start", record_start)
+        monkeypatch.setattr(sup, "_await_ready", record_ready)
+
+        try:
+            await sup.start_all()
+        finally:
+            await sup.shutdown(timeout=1.0)
+
+        assert events == [
+            "start:first",
+            "ready:first",
+            "start:second",
+            "ready:second",
+        ]
+
+    @pytest.mark.asyncio
     async def test_successful_http_response_must_pass_the_child_check(self) -> None:
         port = _free_port()
         spec = ChildSpec(

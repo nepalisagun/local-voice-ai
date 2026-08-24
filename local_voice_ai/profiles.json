@@ -89,7 +89,8 @@
         "DEVICE": "cuda",
         "LLAMA_N_GPU_LAYERS": "999",
         "JETSON_LLAMA_BASE_URL": "http://127.0.0.1:11435/v1",
-        "JETSON_LLAMA_BIND_PORT": "11435"
+        "JETSON_LLAMA_BIND_PORT": "11435",
+        "SEQUENTIAL_STARTUP": "1"
       }
     },
     "jetson": {
@@ -106,7 +107,8 @@
         "DEVICE": "cuda",
         "LLAMA_N_GPU_LAYERS": "999",
         "JETSON_LLAMA_BASE_URL": "http://127.0.0.1:11435/v1",
-        "JETSON_LLAMA_BIND_PORT": "11435"
+        "JETSON_LLAMA_BIND_PORT": "11435",
+        "SEQUENTIAL_STARTUP": "1"
       }
     }
   }

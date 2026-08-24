@@ -323,6 +323,24 @@ class TestStatusDetails:
         llama = next(c for c in provider() if c["name"] == "llama")
         assert llama["detail"] == "2 MB"
 
+    def test_detail_does_not_count_hugging_face_symlinks_twice(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        provider, cfg = self._provider(tmp_path, monkeypatch)
+        repo_dir = (
+            tmp_path / "hub"
+            / f"models--{cfg.llama_hf_repo.split(':')[0].replace('/', '--')}"
+        )
+        blob = repo_dir / "blobs" / "model"
+        blob.parent.mkdir(parents=True)
+        blob.write_bytes(b"\0" * 2_000_000)
+        snapshot = repo_dir / "snapshots" / "revision" / "model.gguf"
+        snapshot.parent.mkdir(parents=True)
+        snapshot.symlink_to(blob)
+
+        llama = next(c for c in provider() if c["name"] == "llama")
+        assert llama["detail"] == "2 MB"
+
     def test_startup_line_format(self) -> None:
         line = _startup_line([
             {"name": "llama", "ready": False, "detail": "1.2 GB"},

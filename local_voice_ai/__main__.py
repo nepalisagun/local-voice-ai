@@ -82,11 +82,16 @@ def _llama_repo_cached(repo: str, env: dict[str, str]) -> bool:
 def _dir_size(path: Path) -> int:
     """Total bytes under ``path`` (0 if missing). Cheap: /models holds few files."""
     total = 0
+    seen_files: set[tuple[int, int]] = set()
     if path.is_dir():
         for p in path.rglob("*"):
             try:
                 if p.is_file():
-                    total += p.stat().st_size
+                    stat = p.stat()
+                    identity = (stat.st_dev, stat.st_ino)
+                    if identity not in seen_files:
+                        seen_files.add(identity)
+                        total += stat.st_size
             except OSError:
                 continue
     return total
@@ -311,7 +316,7 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
 
 async def _serve(cfg: Config) -> int:
     specs = _build_specs(cfg)
-    supervisor = Supervisor(specs)
+    supervisor = Supervisor(specs, sequential_startup=cfg.sequential_startup)
 
     logger.info(
         "supervisor managing %d children (livekit=%s llama=%s stt=%s tts=%s)",

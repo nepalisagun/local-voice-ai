@@ -85,6 +85,10 @@ On Jetson, the managed llama.cpp server uses port 11435. Port 11434 remains
 available for Ollama. The supervisor accepts llama.cpp only when its expected
 model appears in the response.
 
+The Jetson profile loads managed services one at a time. This avoids temporary
+memory spikes while Gemma, Nemotron, and Kokoro initialize in shared memory.
+After startup, all services remain loaded and run together.
+
 The image uses Python 3.12 and CUDA-enabled PyTorch 2.7. Its public
 [Jetson Containers](https://github.com/dusty-nv/jetson-containers) base is
 pinned by digest. Thus, an NGC account is not necessary.

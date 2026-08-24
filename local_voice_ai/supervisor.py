@@ -52,8 +52,11 @@ class _Child:
 
 
 class Supervisor:
-    def __init__(self, specs: list[ChildSpec]) -> None:
+    def __init__(
+        self, specs: list[ChildSpec], *, sequential_startup: bool = False
+    ) -> None:
         self._children: list[_Child] = [_Child(spec=spec) for spec in specs]
+        self._sequential_startup = sequential_startup
         self._stop_event = asyncio.Event()
         self._http: httpx.AsyncClient | None = None
 
@@ -80,7 +83,15 @@ class Supervisor:
 
         self._http = httpx.AsyncClient(timeout=httpx.Timeout(2.0))
 
-        # Spawn all children in parallel; each one's readiness wait is independent.
+        # Unified-memory systems can run the completed stack but exceed their
+        # memory budget while several model loaders allocate temporary buffers.
+        if self._sequential_startup:
+            for child in self._children:
+                await self._start(child)
+                await self._await_ready(child)
+            return
+
+        # Discrete-GPU and CPU systems favor faster parallel startup.
         await asyncio.gather(*(self._start(child) for child in self._children))
         await asyncio.gather(*(self._await_ready(child) for child in self._children))
 
