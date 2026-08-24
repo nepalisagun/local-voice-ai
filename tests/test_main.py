@@ -341,6 +341,24 @@ class TestStatusDetails:
         llama = next(c for c in provider() if c["name"] == "llama")
         assert llama["detail"] == "2 MB"
 
+    def test_onnx_tts_progress_uses_its_own_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HF_HOME", str(tmp_path / "huggingface"))
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+        monkeypatch.setenv("TTS_PROVIDER", "kokoro-onnx")
+        cfg = Config.from_env()
+        sup = Supervisor(_build_specs(cfg))
+        model = tmp_path / "kokoro-onnx" / "model.onnx.part"
+        model.parent.mkdir(parents=True)
+        model.write_bytes(b"\0" * 2_000_000)
+
+        kokoro = next(
+            c for c in make_status_provider(sup, cfg)() if c["name"] == "kokoro"
+        )
+
+        assert kokoro["detail"] == "2 MB"
+
     def test_startup_line_format(self) -> None:
         line = _startup_line([
             {"name": "llama", "ready": False, "detail": "1.2 GB"},
@@ -359,6 +377,17 @@ class TestWhisperSpec:
         assert "local_voice_ai.services.whisper.server" in spec.argv
         assert spec.env["WHISPER_MODEL"] == "Systran/faster-whisper-small"
         assert spec.ready_url == "http://127.0.0.1:8000/health"
+
+    def test_whisper_can_run_on_cpu_while_llama_uses_cuda(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("STT_PROVIDER", "whisper")
+        monkeypatch.setenv("DEVICE", "cuda")
+        monkeypatch.setenv("STT_DEVICE", "cpu")
+
+        spec = next(s for s in _build_specs(Config.from_env()) if s.name == "whisper")
+
+        assert spec.env["DEVICE"] == "cpu"
 
     def test_nemotron_is_default(self) -> None:
         cfg = Config.from_env()

@@ -205,6 +205,17 @@ class TestLowMemoryRuntimeOptions:
         assert cfg.agent_env()["TURN_DETECTION"] == "vad"
         assert cfg.agent_env()["AGENT_IDLE_PROCESSES"] == "1"
 
+    def test_stt_device_can_differ_from_the_llm_device(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DEVICE", "cuda")
+        monkeypatch.setenv("STT_DEVICE", "cpu")
+
+        cfg = Config.from_env()
+
+        assert cfg.device == "cuda"
+        assert cfg.stt_device == "cpu"
+
 
 class TestAgentEnv:
     def test_agent_env_carries_all_provider_urls(self) -> None:

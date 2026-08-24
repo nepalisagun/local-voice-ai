@@ -129,6 +129,9 @@ class Config:
 
     # Whisper (faster-whisper) specific
     whisper_model: str = "Systran/faster-whisper-small"
+    # Optional STT-only override. For example, Jetson runs Whisper on CPU while
+    # llama.cpp continues to use CUDA through LLAMA_N_GPU_LAYERS.
+    stt_device: str = ""
 
 
     # --- TTS (Kokoro) ---------------------------------------------------
@@ -231,6 +234,7 @@ class Config:
             nemotron_fp16=_env_bool("NEMOTRON_FP16", cls.nemotron_fp16),
             nemotron_itn=_env_bool("NEMOTRON_ITN", cls.nemotron_itn),
             whisper_model=os.getenv("WHISPER_MODEL", cls.whisper_model),
+            stt_device=os.getenv("STT_DEVICE", cls.stt_device).lower(),
             #
             wake_word=_env_bool("WAKE_WORD", cls.wake_word),
             wake_word_model=os.getenv("WAKE_WORD_MODEL", cls.wake_word_model),

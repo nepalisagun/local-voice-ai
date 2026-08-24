@@ -54,7 +54,7 @@ The initial catalog has three conservative variants of the v2 stack:
 
 | Profile | Planning target | Configuration |
 |---|---:|---|
-| `lean` | about 5.0 GB | Qwen3 1.7B Q4 + Nemotron 0.6B FP16 + Kokoro ONNX FP16, one 4K slot |
+| `lean` | about 4.7 GB | Qwen3 1.7B Q4 + Whisper Small on CPU + Kokoro ONNX FP16, one 4K slot |
 | `compact` | about 5.5 GB | Gemma 4 E2B Q4 + Nemotron 0.6B FP16 + Kokoro, one 4K slot |
 | `balanced` | about 6.5 GB | Same models with one 16K slot |
 
@@ -86,11 +86,10 @@ On Jetson, the managed llama.cpp server uses port 11435. Port 11434 remains
 available for Ollama. The supervisor accepts llama.cpp only when its expected
 model appears in the response.
 
-The Jetson profile loads managed services one at a time, with Nemotron before
-the language model. Nemotron releases its large restore buffers before Qwen,
-Kokoro, and the agent start. It uses the lower-memory Kokoro ONNX runtime,
-VAD-only endpointing, and one idle agent process. After startup, all services
-remain loaded and run together.
+The Jetson profile loads managed services one at a time. It runs Whisper Small
+on the CPU while llama.cpp uses CUDA. It also uses the lower-memory Kokoro ONNX
+runtime, VAD-only endpointing, and one idle agent process. After startup, all
+services remain loaded and run together.
 
 The voice UI uses one Qwen inference slot and does not load the repository's
 vision projector. These settings preserve memory for speech services.
@@ -100,7 +99,7 @@ The image uses Python 3.12 and CUDA-enabled PyTorch 2.7. Its public
 pinned by digest. Thus, an NGC account is not necessary.
 
 The first build downloads approximately 5.9 GB for the base image. The models
-use approximately 4.0 GB. Keep at least 29 GB of free disk space for the image,
+use approximately 1.9 GB. Keep at least 29 GB of free disk space for the image,
 models, and build cache. An external SSD gives better build and model-load
 performance than a microSD card.
 
@@ -283,7 +282,7 @@ See `.env` for the full list. The most important ones:
 - `LLAMA_BASE_URL`, `LLAMA_MODEL`, `LLAMA_HF_REPO`, `LLAMA_N_GPU_LAYERS`
 - `LLAMA_OFFLINE` — offline LLM startup. Auto by default: once the model is cached, it starts with no internet (skips the Hugging Face lookup); the first run still downloads. Set `LLAMA_OFFLINE=1` to force it, or `0` to always re-check. `LLAMA_MODEL_PATH=/models/…​.gguf` loads a local file directly instead.
 - `WAKE_WORD=1` — the agent joins deaf and only starts listening after it hears **“Hey LiveKit”** (on-device detection via [livekit-wakeword](https://github.com/livekit/livekit-wakeword), model baked into the image). `WAKE_WORD_THRESHOLD` (default `0.5`) tunes sensitivity; scores are logged at DEBUG for calibration.
-- `STT_PROVIDER` (`nemotron`|`whisper`), `STT_BASE_URL`, `STT_MODEL`; `WHISPER_MODEL` picks the faster-whisper model for the whisper provider.
+- `STT_PROVIDER` (`nemotron`|`whisper`), `STT_BASE_URL`, `STT_MODEL`; `WHISPER_MODEL` picks the faster-whisper model. `STT_DEVICE` can keep Whisper on CPU while the LLM uses the GPU.
 - `TTS_PROVIDER` (`kokoro`|`kokoro-onnx`), `TTS_BASE_URL`, `TTS_VOICE`
 - `TURN_DETECTION` (`multilingual`|`vad`) and `AGENT_IDLE_PROCESSES`; the lean Jetson profile uses `vad` and one idle process to reduce memory.
 - `WEB_PORT` (default `8080`)

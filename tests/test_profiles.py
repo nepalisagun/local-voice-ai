@@ -138,6 +138,7 @@ class TestProfileResolution:
         assert resolved.environment["LLAMA_CTX_SIZE"] == "4096"
         assert resolved.environment["LLAMA_PARALLEL"] == "1"
         assert resolved.environment["LLAMA_MODEL"] == "qwen3-1.7b"
+        assert resolved.model.stt == "Whisper Small (CPU)"
         assert resolved.environment["LLAMA_HF_REPO"] == (
             "unsloth/Qwen3-1.7B-GGUF:UD-Q4_K_XL"
         )
@@ -149,6 +150,8 @@ class TestProfileResolution:
         assert resolved.environment["TTS_PROVIDER"] == "kokoro-onnx"
         assert resolved.environment["TURN_DETECTION"] == "vad"
         assert resolved.environment["AGENT_IDLE_PROCESSES"] == "1"
+        assert resolved.environment["STT_PROVIDER"] == "whisper"
+        assert resolved.environment["STT_DEVICE"] == "cpu"
         assert resolved.platform.runtime == "docker"
         assert resolved.platform.compose_files == (
             "docker-compose.yml",

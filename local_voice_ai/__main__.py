@@ -124,20 +124,25 @@ def make_status_provider(supervisor: Supervisor, cfg: Config):
     byte count rather than a fake percentage.
     """
     hub = _hf_hub_dir(dict(os.environ))
-    repo_for_child = {
-        "llama": _hub_repo_dir(cfg.llama_hf_repo),
-        "nemotron": _hub_repo_dir(cfg.nemotron_model_name),
-        "whisper": _hub_repo_dir(cfg.whisper_model),
-        "kokoro": _hub_repo_dir("hexgrad/Kokoro-82M"),
+    cache = Path(os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache")))
+    path_for_child = {
+        "llama": hub / _hub_repo_dir(cfg.llama_hf_repo),
+        "nemotron": hub / _hub_repo_dir(cfg.nemotron_model_name),
+        "whisper": hub / _hub_repo_dir(cfg.whisper_model),
+        "kokoro": (
+            cache / "kokoro-onnx"
+            if cfg.tts_provider == "kokoro-onnx"
+            else hub / _hub_repo_dir("hexgrad/Kokoro-82M")
+        ),
     }
 
     def status() -> list[dict[str, object]]:
         children = supervisor.status()
         for child in children:
-            repo = repo_for_child.get(str(child["name"]))
-            if child["ready"] or repo is None:
+            path = path_for_child.get(str(child["name"]))
+            if child["ready"] or path is None:
                 continue
-            size = _dir_size(hub / repo)
+            size = _dir_size(path)
             if size > 1_000_000:  # only meaningful once a download has begun
                 child["detail"] = (
                     f"{size / 1e9:.1f} GB" if size >= 1e9 else f"{size / 1e6:.0f} MB"
@@ -262,7 +267,7 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                     ],
                     env={
                         "WHISPER_MODEL": cfg.whisper_model,
-                        "DEVICE": cfg.device,
+                        "DEVICE": cfg.stt_device or cfg.device,
                     },
                     ready_url=f"http://{probe_host(cfg.stt_bind_host)}:{cfg.stt_bind_port}/health",
                     ready_timeout=600.0,

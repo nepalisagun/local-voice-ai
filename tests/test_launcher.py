@@ -36,7 +36,7 @@ def test_plan_explains_shared_memory_and_models() -> None:
     assert "6.0 GB inference budget" in rendered
     assert "Lean" in rendered
     assert "Qwen3 1.7B" in rendered
-    assert "Nemotron Speech 0.6B" in rendered
+    assert "Whisper Small (CPU)" in rendered
     assert "Kokoro" in rendered
     assert "JetPack 6.2.1" in rendered
     assert "L4T 36.4.3" in rendered
