@@ -77,6 +77,10 @@ The launcher selects `docker-compose.jetson.yml` for a supported Jetson. This
 overlay uses the shared GPU memory and compiles llama.cpp for Orin (SM 8.7).
 It does not use the desktop CUDA image.
 
+The Jetson overlay uses host networking for the build and application. This
+avoids Docker 28 bridge rules that require the missing `iptable_raw` kernel
+module on JetPack 6.2. The model services remain bound to loopback.
+
 The image uses Python 3.12 and CUDA-enabled PyTorch 2.7. Its public
 [Jetson Containers](https://github.com/dusty-nv/jetson-containers) base is
 pinned by digest. Thus, an NGC account is not necessary.
