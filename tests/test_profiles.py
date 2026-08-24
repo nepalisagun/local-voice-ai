@@ -108,6 +108,9 @@ class TestProfileResolution:
     def catalog(self):
         return load_catalog(DEFAULT_CATALOG_PATH)
 
+    def test_catalog_uses_python_310_compatible_json(self) -> None:
+        assert DEFAULT_CATALOG_PATH.suffix == ".json"
+
     def test_eight_gb_shared_memory_recommends_compact(self, catalog) -> None:
         hardware = HardwareInfo(
             system="Linux",
@@ -189,6 +192,21 @@ class TestProfileResolution:
         assert resolved.model.key == "compact"
         assert resolved.memory_budget_gib == 5.5
 
+    @pytest.mark.parametrize("budget", [float("nan"), float("inf"), float("-inf")])
+    def test_non_finite_memory_budget_is_rejected(self, catalog, budget: float) -> None:
+        hardware = HardwareInfo(
+            system="Linux",
+            machine="aarch64",
+            platform_key="jetson-orin-nano",
+            device_name="Jetson Orin Nano",
+            accelerator="cuda",
+            memory_topology="shared",
+            total_memory_gib=8.0,
+        )
+
+        with pytest.raises(ValueError, match="finite"):
+            resolve_profile(catalog, hardware, memory_budget_gib=budget)
+
 
 class TestSavedSelection:
     def test_round_trip(self, tmp_path: Path) -> None:
@@ -206,3 +224,21 @@ class TestSavedSelection:
 
     def test_missing_selection_returns_none(self, tmp_path: Path) -> None:
         assert load_selection(tmp_path / "missing.toml") is None
+
+    def test_existing_flat_toml_selection_remains_readable(self, tmp_path: Path) -> None:
+        path = tmp_path / ".local-voice-ai.toml"
+        path.write_text(
+            "version = 1\n"
+            'profile = "compact"\n'
+            'detected_platform = "jetson-orin-nano"\n'
+            "detected_memory_gib = 8\n"
+            "memory_budget_gib = 5.5\n",
+            encoding="utf-8",
+        )
+
+        assert load_selection(path) == UserSelection(
+            profile="compact",
+            detected_platform="jetson-orin-nano",
+            memory_budget_gib=5.5,
+            detected_memory_gib=8.0,
+        )

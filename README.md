@@ -30,6 +30,10 @@ weights:
 python3 run.py
 ```
 
+The setup launcher supports Python 3.10+, including Jetson's system Python.
+The supervised application runtime still requires Python 3.11–3.13; native
+startup checks this separately and reports a clear preflight error.
+
 On the first run it detects Apple Silicon, a desktop NVIDIA GPU, Jetson, or CPU;
 accounts for unified versus discrete memory; and recommends a model profile.
 Press Enter to accept, or choose a different profile or memory budget. The
@@ -59,7 +63,7 @@ conversation state add workload-dependent overhead. Auto selection reserves
 Jetson Orin Nano are capped at `compact` for latency and system headroom.
 
 The model and platform definitions live in
-`local_voice_ai/profiles.toml`. Platform profiles decide the runtime and device;
+`local_voice_ai/profiles.json`. Platform profiles decide the runtime and device;
 model profiles decide weights, context, and estimated memory. Shell variables
 and `.env.local` still override profile values.
 
@@ -70,8 +74,10 @@ system RAM and its PyTorch build must match JetPack. The launcher chooses the
 native JetPack path and verifies CUDA-enabled PyTorch, `llama-server`, and
 `livekit-server` before starting. It deliberately does not apply the desktop
 `docker-compose.gpu.yml` image to Jetson. A fully automated JetPack container is
-still needed; until then, provision the native dependencies for the installed
-JetPack release first.
+still needed. Jetson's Python 3.10 can run the setup screen but not the current
+application environment; until the container exists, native startup needs a
+Python 3.11–3.13 environment with dependencies compatible with the installed
+JetPack release.
 
 ### Direct container run
 
@@ -192,7 +198,7 @@ LLAMA_N_GPU_LAYERS=999 DEVICE=cuda .venv/bin/python -m local_voice_ai serve
 ├─ local_voice_ai/         # Python package: supervisor + agent + services
 │  ├─ __main__.py          # python -m local_voice_ai serve
 │  ├─ profiles.py          # hardware detection + profile resolution
-│  ├─ profiles.toml        # model and platform profile catalog
+│  ├─ profiles.json        # model and platform profile catalog
 │  ├─ launcher.py          # dependency-free terminal setup presentation
 │  ├─ supervisor.py        # async process supervisor
 │  ├─ config.py            # env-driven config + manage-X flags

@@ -21,6 +21,9 @@ jobs:
           enable-cache: true
       # The lockfile targets Python 3.11 (cp310 lacks wheels for some pins).
       - run: uv sync --frozen --extra dev -p 3.11
+      # The dependency-free hardware/profile launcher must still bootstrap on
+      # Jetson's system Python before it checks the 3.11+ application runtime.
+      - run: uv run --no-project -p 3.10 python run.py plan --profile compact --memory-gb 5.5
       - run: uv run --frozen -p 3.11 --extra dev pytest tests/ -q
 
   frontend:

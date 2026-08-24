@@ -7,6 +7,7 @@ launcher imports it before the project's virtual environment necessarily exists.
 from __future__ import annotations
 
 import json
+import math
 import os
 import platform
 import subprocess
@@ -14,9 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-import tomllib
-
-DEFAULT_CATALOG_PATH = Path(__file__).with_name("profiles.toml")
+DEFAULT_CATALOG_PATH = Path(__file__).with_name("profiles.json")
 
 
 @dataclass(frozen=True)
@@ -113,8 +112,8 @@ def _string_map(raw: object, field_name: str) -> dict[str, str]:
 
 
 def load_catalog(path: Path = DEFAULT_CATALOG_PATH) -> ProfileCatalog:
-    with path.open("rb") as source:
-        raw = tomllib.load(source)
+    with path.open(encoding="utf-8") as source:
+        raw = json.load(source)
 
     models: dict[str, ModelProfile] = {}
     for key, values in raw.get("models", {}).items():
@@ -303,8 +302,8 @@ def resolve_profile(
         raise ValueError(f"no platform profile for {hardware.platform_key!r}") from exc
 
     budget = hardware.inference_budget_gib if memory_budget_gib is None else memory_budget_gib
-    if budget <= 0:
-        raise ValueError("memory budget must be greater than zero")
+    if not math.isfinite(budget) or budget <= 0:
+        raise ValueError("memory budget must be a finite number greater than zero")
 
     ordered = catalog.ordered_models()
     automatic = requested == "auto"
@@ -365,8 +364,18 @@ def save_selection(path: Path, selection: UserSelection) -> None:
 def load_selection(path: Path) -> UserSelection | None:
     if not path.is_file():
         return None
-    with path.open("rb") as source:
-        raw = tomllib.load(source)
+    raw: dict[str, object] = {}
+    for line_number, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise ValueError(f"invalid selection line {line_number} in {path}")
+        key, encoded_value = (part.strip() for part in line.split("=", 1))
+        try:
+            raw[key] = json.loads(encoded_value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid selection value on line {line_number} in {path}") from exc
     if int(raw.get("version", 0)) != 1:
         raise ValueError(f"unsupported selection version in {path}")
     memory = raw.get("memory_budget_gib")

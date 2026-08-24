@@ -167,6 +167,29 @@ def _native_dependency_error(python: Path) -> str | None:
     return f"native Python dependencies are incomplete{suffix}"
 
 
+def _native_python_version_error(python: Path) -> str | None:
+    probe = _run(
+        [
+            str(python),
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ],
+        capture=True,
+        timeout=10,
+    )
+    version = probe.stdout.strip()
+    try:
+        major, minor = (int(part) for part in version.split(".", 1))
+    except ValueError:
+        return f"could not determine the Python version for {python}"
+    if (major, minor) < (3, 11) or (major, minor) >= (3, 14):
+        return (
+            f"the application runtime requires Python 3.11-3.13; "
+            f"{python} is Python {version} (it can run the setup launcher only)"
+        )
+    return None
+
+
 def preflight(profile: ResolvedProfile, environment: Mapping[str, str]) -> list[str]:
     """Return actionable startup blockers without changing the machine."""
     errors: list[str] = []
@@ -194,16 +217,21 @@ def preflight(profile: ResolvedProfile, environment: Mapping[str, str]) -> list[
         return errors
 
     python = _native_python()
-    dependency_error = _native_dependency_error(python)
-    if dependency_error:
-        if profile.hardware.platform_key.startswith("jetson"):
-            errors.append(
-                dependency_error
-                + "; install the NVIDIA PyTorch build matched to this JetPack release, "
-                "then install the project dependencies without replacing it"
-            )
-        else:
-            errors.append(dependency_error + "; run `uv sync --extra ml --extra dev` first")
+    version_error = _native_python_version_error(python)
+    dependency_error: str | None = None
+    if version_error:
+        errors.append(version_error)
+    else:
+        dependency_error = _native_dependency_error(python)
+        if dependency_error:
+            if profile.hardware.platform_key.startswith("jetson"):
+                errors.append(
+                    dependency_error
+                    + "; install the NVIDIA PyTorch build matched to this JetPack release, "
+                    "then install the project dependencies without replacing it"
+                )
+            else:
+                errors.append(dependency_error + "; run `uv sync --extra ml --extra dev` first")
 
     search_path = environment.get("PATH")
     for binary in ("livekit-server", "llama-server"):
@@ -227,7 +255,7 @@ def preflight(profile: ResolvedProfile, environment: Mapping[str, str]) -> list[
         ]
         accelerator_label = "Metal-enabled PyTorch"
 
-    if accelerator_probe is not None and dependency_error is None:
+    if accelerator_probe is not None and version_error is None and dependency_error is None:
         try:
             result = _run(accelerator_probe, capture=True, timeout=30)
         except subprocess.TimeoutExpired:

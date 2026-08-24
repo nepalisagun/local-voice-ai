@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -86,6 +87,10 @@ def test_saved_budget_only_persists_a_manual_override() -> None:
     assert automatic.memory_budget_gib is None
     assert manual.memory_budget_gib == profile.memory_budget_gib
     assert automatic.detected_memory_gib == 12.0
+
+
+def test_current_python_is_supported_for_native_runtime() -> None:
+    assert run_launcher._native_python_version_error(Path(sys.executable)) is None
 
 
 def test_noninteractive_configure_saves_the_explicit_choice(
