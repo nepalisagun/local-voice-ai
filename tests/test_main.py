@@ -365,6 +365,14 @@ class TestWhisperSpec:
         names = [s.name for s in _build_specs(cfg)]
         assert "nemotron" in names and "whisper" not in names
 
+    def test_sequential_startup_loads_stt_before_llama(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SEQUENTIAL_STARTUP", "1")
+        names = [spec.name for spec in _build_specs(Config.from_env())]
+
+        assert names.index("nemotron") < names.index("llama")
+
 
 class TestBindHost:
     """Inference children bind loopback unless explicitly widened."""

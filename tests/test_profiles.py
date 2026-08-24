@@ -119,7 +119,7 @@ class TestProfileResolution:
     def test_catalog_uses_python_310_compatible_json(self) -> None:
         assert DEFAULT_CATALOG_PATH.suffix == ".json"
 
-    def test_eight_gb_shared_memory_recommends_compact(self, catalog) -> None:
+    def test_eight_gb_shared_memory_recommends_lean(self, catalog) -> None:
         hardware = HardwareInfo(
             system="Linux",
             machine="aarch64",
@@ -132,11 +132,15 @@ class TestProfileResolution:
 
         resolved = resolve_profile(catalog, hardware)
 
-        assert resolved.model.key == "compact"
+        assert resolved.model.key == "lean"
         assert resolved.memory_budget_gib == 6.0
         assert resolved.environment["DEVICE"] == "cuda"
         assert resolved.environment["LLAMA_CTX_SIZE"] == "4096"
         assert resolved.environment["LLAMA_PARALLEL"] == "1"
+        assert resolved.environment["LLAMA_MODEL"] == "qwen3-1.7b"
+        assert resolved.environment["LLAMA_HF_REPO"] == (
+            "unsloth/Qwen3-1.7B-GGUF:UD-Q4_K_XL"
+        )
         assert resolved.environment["JETSON_LLAMA_BASE_URL"] == (
             "http://127.0.0.1:11435/v1"
         )

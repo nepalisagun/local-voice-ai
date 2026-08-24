@@ -315,6 +315,20 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
         )
     )
 
+    if cfg.sequential_startup:
+        # NeMo temporarily needs substantially more memory while restoring its
+        # archive, then releases it. Load STT before the resident LLM on small
+        # unified-memory systems so that restore peak has enough headroom.
+        startup_order = {
+            "livekit": 0,
+            "nemotron": 1,
+            "whisper": 1,
+            "llama": 2,
+            "kokoro": 3,
+            "agent": 4,
+        }
+        specs.sort(key=lambda spec: startup_order.get(spec.name, 5))
+
     return specs
 
 

@@ -50,17 +50,18 @@ python3 run.py logs
 python3 run.py down
 ```
 
-The initial catalog has two conservative variants of the proven v2 stack:
+The initial catalog has three conservative variants of the v2 stack:
 
 | Profile | Planning target | Configuration |
 |---|---:|---|
+| `lean` | about 5.0 GB | Qwen3 1.7B Q4 + Nemotron 0.6B FP16 + Kokoro, one 4K slot |
 | `compact` | about 5.5 GB | Gemma 4 E2B Q4 + Nemotron 0.6B FP16 + Kokoro, one 4K slot |
 | `balanced` | about 6.5 GB | Same models with one 16K slot |
 
 These numbers are planning targets, not hard limits; allocator, driver, and
 conversation state add workload-dependent overhead. Auto selection reserves
-25% (at least 2 GB) on unified-memory systems and 8% on discrete GPUs. CPU and
-Jetson Orin Nano are capped at `compact` for latency and system headroom.
+25% (at least 2 GB) on unified-memory systems and 8% on discrete GPUs. CPU is
+capped at `compact`; Jetson Orin Nano is capped at `lean` for system headroom.
 
 The model and platform definitions live in
 `local_voice_ai/profiles.json`. Platform profiles decide the runtime and device;
@@ -85,9 +86,10 @@ On Jetson, the managed llama.cpp server uses port 11435. Port 11434 remains
 available for Ollama. The supervisor accepts llama.cpp only when its expected
 model appears in the response.
 
-The Jetson profile loads managed services one at a time. This avoids temporary
-memory spikes while Gemma, Nemotron, and Kokoro initialize in shared memory.
-After startup, all services remain loaded and run together.
+The Jetson profile loads managed services one at a time, with Nemotron before
+the language model. Nemotron releases its large restore buffers before Qwen,
+Kokoro, and the agent start. After startup, all services remain loaded and run
+together.
 
 The voice UI uses one Gemma inference slot and does not load the repository's
 vision projector. These settings preserve memory for speech services.

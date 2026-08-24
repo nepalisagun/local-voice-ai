@@ -34,8 +34,8 @@ def test_plan_explains_shared_memory_and_models() -> None:
 
     assert "8.0 GB unified/shared" in rendered
     assert "6.0 GB inference budget" in rendered
-    assert "Compact" in rendered
-    assert "Gemma 4 E2B" in rendered
+    assert "Lean" in rendered
+    assert "Qwen3 1.7B" in rendered
     assert "Nemotron Speech 0.6B" in rendered
     assert "Kokoro" in rendered
     assert "JetPack 6.2.1" in rendered
@@ -56,13 +56,13 @@ def test_enter_accepts_recommendation() -> None:
     )
 
     assert selected is not None
-    assert selected.model.key == "compact"
+    assert selected.model.key == "lean"
     assert "Press Enter to accept" in output.getvalue()
 
 
 def test_change_menu_can_select_another_profile() -> None:
     catalog = load_catalog(DEFAULT_CATALOG_PATH)
-    answers = iter(["c", "2"])
+    answers = iter(["c", "3"])
 
     selected = choose_profile(
         catalog,
