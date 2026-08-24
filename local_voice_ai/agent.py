@@ -43,6 +43,7 @@ class Assistant(Agent):
                 "users with their questions by providing information from your extensive "
                 "knowledge. Your responses are concise, to the point, and without any "
                 "emojis, lists, or other special symbols. "
+                "Use short sentences so spoken audio can begin quickly. "
                 "You are curious, friendly, and have a sense of humor."
             ),
         )
@@ -74,6 +75,12 @@ def prewarm(proc: JobProcess) -> None:
 
 
 server.setup_fnc = prewarm
+
+
+def _turn_detection_mode():
+    # Passing None disables automatic turn completion in current LiveKit
+    # Agents. The low-memory profile needs explicit VAD-only endpointing.
+    return MultilingualModel() if MultilingualModel is not None else "vad"
 
 
 @server.rtc_session()
@@ -141,7 +148,7 @@ async def my_agent(ctx: JobContext) -> None:
             # buffering a complete WAV or MP3 response first.
             response_format="pcm" if tts_provider == "kokoro-onnx" else "mp3",
         ),
-        turn_detection=MultilingualModel() if MultilingualModel is not None else None,
+        turn_detection=_turn_detection_mode(),
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )
