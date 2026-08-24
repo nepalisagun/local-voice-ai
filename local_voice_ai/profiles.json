@@ -9,7 +9,7 @@
       "download_gib": 4.0,
       "llm": "Qwen3 1.7B Q4",
       "stt": "Nemotron Speech 0.6B FP16",
-      "tts": "Kokoro 82M",
+      "tts": "Kokoro 82M ONNX FP16",
       "environment": {
         "LLAMA_MODEL": "qwen3-1.7b",
         "LLAMA_MODEL_ALIAS": "qwen3-1.7b",
@@ -19,7 +19,10 @@
         "STT_PROVIDER": "nemotron",
         "STT_MODEL": "nemotron-speech-streaming",
         "NEMOTRON_MODEL_NAME": "nvidia/nemotron-speech-streaming-en-0.6b",
-        "NEMOTRON_FP16": "1"
+        "NEMOTRON_FP16": "1",
+        "TTS_PROVIDER": "kokoro-onnx",
+        "TURN_DETECTION": "vad",
+        "AGENT_IDLE_PROCESSES": "1"
       }
     },
     "compact": {

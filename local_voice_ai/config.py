@@ -33,6 +33,11 @@ def _env_bool_opt(name: str) -> Optional[bool]:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int_opt(name: str) -> int | None:
+    raw = os.getenv(name)
+    return int(raw) if raw else None
+
+
 _DEFAULT_BIND_HOST = "127.0.0.1"
 
 # Wildcard binds aren't connectable addresses — probe readiness over loopback.
@@ -127,6 +132,7 @@ class Config:
 
 
     # --- TTS (Kokoro) ---------------------------------------------------
+    tts_provider: str = "kokoro"  # "kokoro" | "kokoro-onnx"
     tts_base_url: str = "http://127.0.0.1:8880/v1"
     tts_voice: str = "af_nova"
     tts_api_key: str = "no-key-needed"
@@ -145,6 +151,11 @@ class Config:
     device: str = "cpu"  # cpu | cuda | mps
 
     # --- Misc -----------------------------------------------------------
+    # The multilingual semantic turn detector is more accurate but needs
+    # another model. Small systems can use VAD-only endpointing instead.
+    turn_detection: str = "multilingual"  # "multilingual" | "vad"
+    # None preserves LiveKit's environment-specific default.
+    agent_idle_processes: Optional[int] = None
     # Load managed children one at a time. This reduces temporary memory peaks
     # on small unified-memory devices such as Jetson Orin Nano.
     sequential_startup: bool = False
@@ -227,6 +238,7 @@ class Config:
                 os.getenv("WAKE_WORD_THRESHOLD", str(cls.wake_word_threshold))
             ),
             #
+            tts_provider=os.getenv("TTS_PROVIDER", cls.tts_provider).lower(),
             tts_base_url=tts_base_url,
             tts_voice=os.getenv("TTS_VOICE", cls.tts_voice),
             tts_api_key=os.getenv("TTS_API_KEY", cls.tts_api_key),
@@ -235,6 +247,10 @@ class Config:
             manage_tts=_env_bool("MANAGE_TTS", _is_loopback(tts_base_url)),
             #
             device=os.getenv("DEVICE", cls.device).lower(),
+            turn_detection=os.getenv(
+                "TURN_DETECTION", cls.turn_detection
+            ).lower(),
+            agent_idle_processes=_env_int_opt("AGENT_IDLE_PROCESSES"),
             sequential_startup=_env_bool(
                 "SEQUENTIAL_STARTUP", cls.sequential_startup
             ),
@@ -243,7 +259,7 @@ class Config:
 
     def agent_env(self) -> dict[str, str]:
         """Environment variables to pass to the agent worker subprocess."""
-        return {
+        env = {
             "LIVEKIT_URL": self.livekit_url,
             "LIVEKIT_API_KEY": self.livekit_api_key,
             "LIVEKIT_API_SECRET": self.livekit_api_secret,
@@ -260,4 +276,8 @@ class Config:
             "TTS_BASE_URL": self.tts_base_url,
             "TTS_VOICE": self.tts_voice,
             "TTS_API_KEY": self.tts_api_key,
+            "TURN_DETECTION": self.turn_detection,
         }
+        if self.agent_idle_processes is not None:
+            env["AGENT_IDLE_PROCESSES"] = str(self.agent_idle_processes)
+        return env

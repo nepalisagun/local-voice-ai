@@ -291,11 +291,16 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
 
     # --- TTS (Kokoro) ------------------------------------------------
     if cfg.manage_tts:
+        tts_module = (
+            "local_voice_ai.services.kokoro_onnx.server"
+            if cfg.tts_provider == "kokoro-onnx"
+            else "local_voice_ai.services.kokoro.server"
+        )
         specs.append(
             ChildSpec(
                 name="kokoro",
                 argv=[
-                    py, "-m", "local_voice_ai.services.kokoro.server",
+                    py, "-m", tts_module,
                     "--host", cfg.tts_bind_host,
                     "--port", str(cfg.tts_bind_port),
                 ],
@@ -310,8 +315,9 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
             name="agent",
             argv=[py, "-m", "local_voice_ai.agent", "start"],
             env=cfg.agent_env(),
-            ready_url=None,
-            ready_timeout=30.0,
+            # AgentServer exposes OK only after plugin and worker startup.
+            ready_url="http://127.0.0.1:8081/",
+            ready_timeout=180.0,
         )
     )
 

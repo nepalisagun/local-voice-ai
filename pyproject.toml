@@ -38,6 +38,7 @@ ml = [
     "torchaudio",
     "nemo-toolkit[asr]",
     "kokoro>=0.9",
+    "kokoro-onnx>=0.5",
     "huggingface_hub",
 ]
 # Whisper fallback (faster-whisper) — only when STT_PROVIDER=whisper.

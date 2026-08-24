@@ -22,7 +22,12 @@ from livekit.agents import (
     function_tool,
 )
 from livekit.plugins import openai, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+_TURN_DETECTION = os.getenv("TURN_DETECTION", "multilingual").strip().lower()
+if _TURN_DETECTION == "multilingual":
+    from livekit.plugins.turn_detector.multilingual import MultilingualModel
+else:
+    MultilingualModel = None  # type: ignore[misc,assignment]
 
 logger = logging.getLogger("agent")
 
@@ -58,7 +63,10 @@ class Assistant(Agent):
         return f"The product of {number1} and {number2} is {number1 * number2}."
 
 
-server = AgentServer()
+_idle_processes = os.getenv("AGENT_IDLE_PROCESSES")
+server = AgentServer(
+    **({"num_idle_processes": int(_idle_processes)} if _idle_processes else {})
+)
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -112,7 +120,7 @@ async def my_agent(ctx: JobContext) -> None:
         # pushed". Kokoro ignores the model field, so "tts-1" is purely a
         # protocol selector here.
         tts=openai.TTS(base_url=tts_base_url, model="tts-1", voice=tts_voice, api_key=tts_api_key),
-        turn_detection=MultilingualModel(),
+        turn_detection=MultilingualModel() if MultilingualModel is not None else None,
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
     )

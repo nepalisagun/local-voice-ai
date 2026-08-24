@@ -374,6 +374,24 @@ class TestWhisperSpec:
         assert names.index("nemotron") < names.index("llama")
 
 
+class TestTtsSpec:
+    def test_onnx_provider_uses_low_memory_server(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TTS_PROVIDER", "kokoro-onnx")
+
+        spec = next(s for s in _build_specs(Config.from_env()) if s.name == "kokoro")
+
+        assert "local_voice_ai.services.kokoro_onnx.server" in spec.argv
+
+
+class TestAgentSpec:
+    def test_readiness_waits_for_agent_http_server(self) -> None:
+        spec = next(s for s in _build_specs(Config.from_env()) if s.name == "agent")
+
+        assert spec.ready_url == "http://127.0.0.1:8081/"
+
+
 class TestBindHost:
     """Inference children bind loopback unless explicitly widened."""
 

@@ -146,6 +146,9 @@ class TestProfileResolution:
         )
         assert resolved.environment["JETSON_LLAMA_BIND_PORT"] == "11435"
         assert resolved.environment["SEQUENTIAL_STARTUP"] == "1"
+        assert resolved.environment["TTS_PROVIDER"] == "kokoro-onnx"
+        assert resolved.environment["TURN_DETECTION"] == "vad"
+        assert resolved.environment["AGENT_IDLE_PROCESSES"] == "1"
         assert resolved.platform.runtime == "docker"
         assert resolved.platform.compose_files == (
             "docker-compose.yml",

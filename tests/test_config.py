@@ -179,6 +179,33 @@ class TestSttProviderDefaults:
         assert cfg.stt_model == "custom-model"
 
 
+class TestLowMemoryRuntimeOptions:
+    def test_tts_provider_defaults_to_torch_kokoro(self) -> None:
+        assert Config.from_env().tts_provider == "kokoro"
+
+    def test_empty_idle_process_setting_preserves_livekit_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AGENT_IDLE_PROCESSES", "")
+
+        assert Config.from_env().agent_idle_processes is None
+
+    def test_low_memory_options_reach_children(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TTS_PROVIDER", "kokoro-onnx")
+        monkeypatch.setenv("TURN_DETECTION", "vad")
+        monkeypatch.setenv("AGENT_IDLE_PROCESSES", "1")
+
+        cfg = Config.from_env()
+
+        assert cfg.tts_provider == "kokoro-onnx"
+        assert cfg.turn_detection == "vad"
+        assert cfg.agent_idle_processes == 1
+        assert cfg.agent_env()["TURN_DETECTION"] == "vad"
+        assert cfg.agent_env()["AGENT_IDLE_PROCESSES"] == "1"
+
+
 class TestAgentEnv:
     def test_agent_env_carries_all_provider_urls(self) -> None:
         cfg = Config.from_env()
@@ -187,6 +214,6 @@ class TestAgentEnv:
             "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
             "LLAMA_BASE_URL", "LLAMA_MODEL", "LLAMA_API_KEY",
             "STT_BASE_URL", "STT_MODEL", "STT_API_KEY", "STT_PROVIDER",
-            "TTS_BASE_URL", "TTS_VOICE", "TTS_API_KEY",
+            "TTS_BASE_URL", "TTS_VOICE", "TTS_API_KEY", "TURN_DETECTION",
         ):
             assert required in env, f"agent_env missing {required}"
