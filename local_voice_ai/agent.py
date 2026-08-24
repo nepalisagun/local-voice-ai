@@ -117,6 +117,8 @@ async def my_agent(ctx: JobContext) -> None:
     wake_word_model = os.getenv("WAKE_WORD_MODEL", "/app/models/wakeword/hey_livekit.onnx")
     wake_word_threshold = float(os.getenv("WAKE_WORD_THRESHOLD", "0.5"))
 
+    session_vad = ctx.proc.userdata["vad"]
+
     if stt_provider == "nemotron-cpp":
         from .nemotron_stt import NemotronSTT
 
@@ -125,6 +127,10 @@ async def my_agent(ctx: JobContext) -> None:
             model=stt_model,
             api_key=stt_api_key,
             endpointing_ms=int(os.getenv("NEMOTRON_ENDPOINTING_MS", "300")),
+            # NeMo-Speech.cpp requires the client to commit each utterance.
+            # Reuse Silero's weights in a second stream so real microphone
+            # noise does not make endpointing depend on a fragile RMS cutoff.
+            vad_model=session_vad,
         )
     else:
         stt = openai.STT(base_url=stt_base_url, model=stt_model, api_key=stt_api_key)
@@ -149,7 +155,7 @@ async def my_agent(ctx: JobContext) -> None:
             response_format="pcm" if tts_provider == "kokoro-onnx" else "mp3",
         ),
         turn_detection=_turn_detection_mode(),
-        vad=ctx.proc.userdata["vad"],
+        vad=session_vad,
         preemptive_generation=True,
     )
 

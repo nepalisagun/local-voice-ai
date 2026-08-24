@@ -16,6 +16,7 @@ from livekit.agents import (
     APIStatusError,
     APITimeoutError,
     stt,
+    vad,
 )
 from livekit.agents.language import LanguageCode
 from livekit.agents.types import NOT_GIVEN, NotGivenOr
@@ -35,6 +36,7 @@ class NemotronSTT(stt.STT):
         api_key: str = "no-key-needed",
         language: str = "en",
         endpointing_ms: int = 300,
+        vad_model: vad.VAD | None = None,
         ws_session: aiohttp.ClientSession | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
@@ -50,6 +52,7 @@ class NemotronSTT(stt.STT):
         self._api_key = api_key
         self._language = LanguageCode(language)
         self._endpointing_ms = endpointing_ms
+        self._vad_model = vad_model
         self._ws_session = ws_session
         self._owns_ws_session = ws_session is None
         self._http_client = http_client or httpx.AsyncClient(timeout=30.0)
@@ -171,6 +174,9 @@ class NemotronSpeechStream(stt.RecognizeStream):
         self._current_text = ""
         self._in_speech = False
         self._audio_since_final = 0.0
+        self._uncommitted_audio = 0.0
+        self._commit_pending = False
+        self._commit_lock = asyncio.Lock()
 
     async def _run(self) -> None:
         session = self._recognizer._ensure_ws_session()
@@ -186,19 +192,43 @@ class NemotronSpeechStream(stt.RecognizeStream):
             raise APIConnectionError(str(error)) from error
 
         input_done = asyncio.Event()
+        vad_stream = (
+            self._recognizer._vad_model.stream()
+            if self._recognizer._vad_model is not None
+            else None
+        )
         await ws.send_json(self._recognizer.session_update(self._language))
         self._report_connection_acquired(0.0, False)
+
+        async def commit_audio() -> None:
+            async with self._commit_lock:
+                if self._commit_pending or self._uncommitted_audio <= 0:
+                    return
+                await ws.send_json({"type": "input_audio_buffer.commit"})
+                self._commit_pending = True
+                self._uncommitted_audio = 0.0
 
         async def send_audio() -> None:
             try:
                 async for item in self._input_ch:
                     if isinstance(item, rtc.AudioFrame):
                         self._audio_since_final += item.duration
+                        self._uncommitted_audio += item.duration
                         await ws.send_bytes(item.data.tobytes())
+                        if vad_stream is not None:
+                            vad_stream.push_frame(item)
                     else:
-                        await ws.send_json({"type": "input_audio_buffer.commit"})
+                        await commit_audio()
             finally:
+                if vad_stream is not None:
+                    vad_stream.end_input()
                 input_done.set()
+
+        async def detect_end_of_speech() -> None:
+            assert vad_stream is not None
+            async for event in vad_stream:
+                if event.type == vad.VADEventType.END_OF_SPEECH:
+                    await commit_audio()
 
         async def receive_events() -> None:
             while True:
@@ -218,12 +248,16 @@ class NemotronSpeechStream(stt.RecognizeStream):
                     raise APIConnectionError(str(ws.exception()))
 
         tasks = [asyncio.create_task(send_audio()), asyncio.create_task(receive_events())]
+        if vad_stream is not None:
+            tasks.append(asyncio.create_task(detect_end_of_speech()))
         try:
             await asyncio.gather(*tasks)
         finally:
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            if vad_stream is not None:
+                await vad_stream.aclose()
             await ws.close()
 
     def _handle_event(self, event: dict[str, object]) -> None:
@@ -249,6 +283,7 @@ class NemotronSpeechStream(stt.RecognizeStream):
             return
 
         if event_type == "conversation.item.input_audio_transcription.completed":
+            self._commit_pending = False
             transcript = str(event.get("transcript", "")).strip()
             if transcript:
                 self._event_ch.send_nowait(
