@@ -13,6 +13,7 @@ services:
         JETSON_PYTORCH_IMAGE: ${JETSON_PYTORCH_IMAGE:-docker.io/dustynv/pytorch:2.7-r36.4.0-cu128-24.04@sha256:4bb7f0a3852f86629ed271aaf6c4aa000305cc4e4673b8e9f334668ee1b22bc8}
         LIVEKIT_IMAGE: ${LIVEKIT_IMAGE:-livekit/livekit-server:latest}
         LLAMA_CPP_REF: ${LLAMA_CPP_REF:-b3c3b96a139d4ef1bdec926ac17aa040981cfc5d}
+        NEMO_SPEECH_CPP_REF: ${NEMO_SPEECH_CPP_REF:-4f9676226f667d14608487df744f375db87127f8}
     runtime: nvidia
     # The same kernel gap affects runtime bridge endpoints. The supervisor only
     # binds the web and LiveKit services to 0.0.0.0. Model services stay on

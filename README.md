@@ -12,7 +12,9 @@ Everything runs as managed children of one Python supervisor (`python -m local_v
 
 - **LiveKit server** (Go binary subprocess) for WebRTC signaling — skipped if `LIVEKIT_URL` points at LiveKit Cloud.
 - **llama.cpp** (`llama-server` binary subprocess) for the LLM — default model is Gemma 4 E2B (quantization-aware-trained 4-bit, ~2.6 GB); swap it with `LLAMA_HF_REPO=org/repo:quant`. Skipped if `LLAMA_BASE_URL` points elsewhere.
-- **Nemotron STT** or **Whisper (faster-whisper)** — Python uvicorn child, OpenAI-compatible.
+- **Nemotron STT** or **Whisper (faster-whisper)**. Jetson uses the native,
+  quantized NeMo-Speech.cpp server and its realtime WebSocket. Other profiles
+  can use the Python OpenAI-compatible services.
 - **Kokoro TTS** — Python uvicorn child, OpenAI-compatible.
 - **LiveKit Agents worker** — the orchestrator child.
 - **FastAPI** in the supervisor itself, serving `POST /api/connection-details` (token minting) and the statically-exported Next.js frontend.
@@ -50,18 +52,20 @@ python3 run.py logs
 python3 run.py down
 ```
 
-The initial catalog has three conservative variants of the v2 stack:
+The initial catalog has four conservative variants of the v2 stack:
 
 | Profile | Planning target | Configuration |
 |---|---:|---|
 | `lean` | about 4.7 GB | Qwen3 1.7B Q4 + Whisper Small on CPU + Kokoro ONNX FP16, one 4K slot |
+| `jetson-realtime` | about 4.7 GB | Qwen3 1.7B Q4 + native Nemotron 0.6B Q8 streaming + Kokoro ONNX FP16, one 4K slot |
 | `compact` | about 5.5 GB | Gemma 4 E2B Q4 + Nemotron 0.6B FP16 + Kokoro, one 4K slot |
 | `balanced` | about 6.5 GB | Same models with one 16K slot |
 
 These numbers are planning targets, not hard limits; allocator, driver, and
 conversation state add workload-dependent overhead. Auto selection reserves
 25% (at least 2 GB) on unified-memory systems and 8% on discrete GPUs. CPU is
-capped at `compact`; Jetson Orin Nano is capped at `lean` for system headroom.
+capped at `compact`. Jetson Orin Nano uses the Jetson-only `jetson-realtime`
+profile for system headroom and low speech latency.
 
 The model and platform definitions live in
 `local_voice_ai/profiles.json`. Platform profiles decide the runtime and device;
@@ -86,10 +90,12 @@ On Jetson, the managed llama.cpp server uses port 11435. Port 11434 remains
 available for Ollama. The supervisor accepts llama.cpp only when its expected
 model appears in the response.
 
-The Jetson profile loads managed services one at a time. It runs Whisper Small
-on the CPU while llama.cpp uses CUDA. It also uses the lower-memory Kokoro ONNX
-runtime, VAD-only endpointing, and one idle agent process. After startup, all
-services remain loaded and run together.
+The Jetson profile loads managed services one at a time. It runs native
+NeMo-Speech.cpp on CUDA with the Nemotron Q8 model. Microphone PCM enters its
+realtime WebSocket as it arrives, and the server returns interim transcripts.
+The profile also uses the lower-memory Kokoro ONNX runtime, raw PCM output,
+VAD-only endpointing, and one idle agent process. After startup, all services
+remain loaded and run together.
 
 The voice UI uses one Qwen inference slot and does not load the repository's
 vision projector. These settings preserve memory for speech services.
@@ -98,10 +104,11 @@ The image uses Python 3.12 and CUDA-enabled PyTorch 2.7. Its public
 [Jetson Containers](https://github.com/dusty-nv/jetson-containers) base is
 pinned by digest. Thus, an NGC account is not necessary.
 
-The first build downloads approximately 5.9 GB for the base image. The models
-use approximately 1.9 GB. Keep at least 29 GB of free disk space for the image,
-models, and build cache. An external SSD gives better build and model-load
-performance than a microSD card.
+The first build downloads approximately 5.9 GB for the base image and compiles
+the two native CUDA servers. The selected models use approximately 2.0 GB.
+Keep at least 29 GB of free disk space for the image, models, and build cache.
+An external SSD gives better build and model-load performance than a microSD
+card.
 
 Start the recommended profile with this command:
 
@@ -220,7 +227,7 @@ LLAMA_N_GPU_LAYERS=999 DEVICE=cuda .venv/bin/python -m local_voice_ai serve
 │  │                                                                │
 │  ├── child: livekit-server     (skipped if LIVEKIT_URL external) │
 │  ├── child: llama-server       (skipped if LLAMA_BASE_URL ext.)  │
-│  ├── child: nemotron | whisper (skipped if STT_BASE_URL ext.)    │
+│  ├── child: nemotron native | Python | whisper (if managed)      │
 │  ├── child: kokoro             (skipped if TTS_BASE_URL ext.)    │
 │  ├── child: livekit-agents worker                                │
 │  └── in-process: FastAPI on :8080                                 │
@@ -246,6 +253,7 @@ LLAMA_N_GPU_LAYERS=999 DEVICE=cuda .venv/bin/python -m local_voice_ai serve
 │  ├─ wakeword.py          # optional "hey livekit" gate for the agent
 │  └─ services/
 │     ├─ nemotron/server.py
+│     ├─ nemotron_cpp/launcher.py
 │     ├─ whisper/server.py
 │     └─ kokoro/server.py
 ├─ frontend/               # Next.js (configured for static export)
@@ -282,7 +290,7 @@ See `.env` for the full list. The most important ones:
 - `LLAMA_BASE_URL`, `LLAMA_MODEL`, `LLAMA_HF_REPO`, `LLAMA_N_GPU_LAYERS`
 - `LLAMA_OFFLINE` — offline LLM startup. Auto by default: once the model is cached, it starts with no internet (skips the Hugging Face lookup); the first run still downloads. Set `LLAMA_OFFLINE=1` to force it, or `0` to always re-check. `LLAMA_MODEL_PATH=/models/…​.gguf` loads a local file directly instead.
 - `WAKE_WORD=1` — the agent joins deaf and only starts listening after it hears **“Hey LiveKit”** (on-device detection via [livekit-wakeword](https://github.com/livekit/livekit-wakeword), model baked into the image). `WAKE_WORD_THRESHOLD` (default `0.5`) tunes sensitivity; scores are logged at DEBUG for calibration.
-- `STT_PROVIDER` (`nemotron`|`whisper`), `STT_BASE_URL`, `STT_MODEL`; `WHISPER_MODEL` picks the faster-whisper model. `STT_DEVICE` can keep Whisper on CPU while the LLM uses the GPU.
+- `STT_PROVIDER` (`nemotron`|`nemotron-cpp`|`whisper`), `STT_BASE_URL`, `STT_MODEL`; `WHISPER_MODEL` picks the faster-whisper model. `STT_DEVICE` can keep Whisper on CPU while the LLM uses the GPU.
 - `TTS_PROVIDER` (`kokoro`|`kokoro-onnx`), `TTS_BASE_URL`, `TTS_VOICE`
 - `TURN_DETECTION` (`multilingual`|`vad`) and `AGENT_IDLE_PROCESSES`; the lean Jetson profile uses `vad` and one idle process to reduce memory.
 - `WEB_PORT` (default `8080`)

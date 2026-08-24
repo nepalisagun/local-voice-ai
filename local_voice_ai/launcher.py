@@ -96,7 +96,7 @@ def choose_profile(
             return None
         if choice == "c":
             output.write("\n")
-            models = catalog.ordered_models()
+            models = catalog.ordered_models(hardware.platform_key)
             for index, model in enumerate(models, 1):
                 output.write(f"  {index}. {model.label} · about {model.target_memory_gib:.1f} GB\n")
             output.write("Choose profile: ")

@@ -119,7 +119,7 @@ class TestProfileResolution:
     def test_catalog_uses_python_310_compatible_json(self) -> None:
         assert DEFAULT_CATALOG_PATH.suffix == ".json"
 
-    def test_eight_gb_shared_memory_recommends_lean(self, catalog) -> None:
+    def test_eight_gb_shared_memory_recommends_realtime_jetson(self, catalog) -> None:
         hardware = HardwareInfo(
             system="Linux",
             machine="aarch64",
@@ -132,13 +132,13 @@ class TestProfileResolution:
 
         resolved = resolve_profile(catalog, hardware)
 
-        assert resolved.model.key == "lean"
+        assert resolved.model.key == "jetson-realtime"
         assert resolved.memory_budget_gib == 6.0
         assert resolved.environment["DEVICE"] == "cuda"
         assert resolved.environment["LLAMA_CTX_SIZE"] == "4096"
         assert resolved.environment["LLAMA_PARALLEL"] == "1"
         assert resolved.environment["LLAMA_MODEL"] == "qwen3-1.7b"
-        assert resolved.model.stt == "Whisper Small (CPU)"
+        assert resolved.model.stt == "Nemotron Speech 0.6B Q8 (native streaming)"
         assert resolved.environment["LLAMA_HF_REPO"] == (
             "unsloth/Qwen3-1.7B-GGUF:UD-Q4_K_XL"
         )
@@ -150,8 +150,7 @@ class TestProfileResolution:
         assert resolved.environment["TTS_PROVIDER"] == "kokoro-onnx"
         assert resolved.environment["TURN_DETECTION"] == "vad"
         assert resolved.environment["AGENT_IDLE_PROCESSES"] == "1"
-        assert resolved.environment["STT_PROVIDER"] == "whisper"
-        assert resolved.environment["STT_DEVICE"] == "cpu"
+        assert resolved.environment["STT_PROVIDER"] == "nemotron-cpp"
         assert resolved.platform.runtime == "docker"
         assert resolved.platform.compose_files == (
             "docker-compose.yml",
@@ -159,6 +158,23 @@ class TestProfileResolution:
         )
         assert resolved.platform.supported_jetpack_versions == ("6.2",)
         assert resolved.platform.supported_l4t_versions == ("36.4",)
+
+    def test_jetson_only_profile_is_not_offered_on_apple_silicon(self, catalog) -> None:
+        hardware = HardwareInfo(
+            system="Darwin",
+            machine="arm64",
+            platform_key="apple-silicon",
+            device_name="Apple Silicon",
+            accelerator="metal",
+            memory_topology="shared",
+            total_memory_gib=16.0,
+        )
+
+        assert "jetson-realtime" not in {
+            model.key for model in catalog.ordered_models(hardware.platform_key)
+        }
+        with pytest.raises(ValueError, match="does not support"):
+            resolve_profile(catalog, hardware, requested="jetson-realtime")
 
     def test_sixteen_gb_apple_silicon_recommends_balanced(self, catalog) -> None:
         hardware = HardwareInfo(

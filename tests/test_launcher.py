@@ -34,9 +34,9 @@ def test_plan_explains_shared_memory_and_models() -> None:
 
     assert "8.0 GB unified/shared" in rendered
     assert "6.0 GB inference budget" in rendered
-    assert "Lean" in rendered
+    assert "Jetson Realtime" in rendered
     assert "Qwen3 1.7B" in rendered
-    assert "Whisper Small (CPU)" in rendered
+    assert "Nemotron Speech 0.6B Q8" in rendered
     assert "Kokoro" in rendered
     assert "JetPack 6.2.1" in rendered
     assert "L4T 36.4.3" in rendered
@@ -56,13 +56,13 @@ def test_enter_accepts_recommendation() -> None:
     )
 
     assert selected is not None
-    assert selected.model.key == "lean"
+    assert selected.model.key == "jetson-realtime"
     assert "Press Enter to accept" in output.getvalue()
 
 
 def test_change_menu_can_select_another_profile() -> None:
     catalog = load_catalog(DEFAULT_CATALOG_PATH)
-    answers = iter(["c", "3"])
+    answers = iter(["c", "4"])
 
     selected = choose_profile(
         catalog,

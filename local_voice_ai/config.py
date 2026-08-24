@@ -12,8 +12,7 @@ at a remote endpoint automatically disables the local child.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
 from urllib.parse import urlparse
 
 
@@ -24,7 +23,7 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _env_bool_opt(name: str) -> Optional[bool]:
+def _env_bool_opt(name: str) -> bool | None:
     """Like ``_env_bool`` but returns ``None`` when the var is unset, so callers
     can distinguish "not configured" (auto) from an explicit true/false."""
     raw = os.getenv(name)
@@ -63,7 +62,7 @@ class Config:
     # --- Web (FastAPI in the supervisor process) -------------------------
     web_host: str = "0.0.0.0"
     web_port: int = 8080
-    frontend_dir: Optional[str] = None  # path to a Next.js static export dir
+    frontend_dir: str | None = None  # path to a Next.js static export dir
     # Expose the OpenAI-compatible /v1/* surface on the web port, proxied to the
     # LLM/STT/TTS children, so one URL serves everything and the children can
     # stay on loopback. Off by default: web_host is already 0.0.0.0 and the
@@ -100,7 +99,7 @@ class Config:
     # internet. ``None`` (the default) means auto: enable --offline when the
     # model is already cached, otherwise allow the first-run download.
     # See https://github.com/ShayneP/local-voice-ai/issues/9
-    llama_offline: Optional[bool] = None
+    llama_offline: bool | None = None
     llama_model_alias: str = "gemma-4-e2b"
     llama_ctx_size: int = 4096
     llama_parallel: int = 4
@@ -158,14 +157,14 @@ class Config:
     # another model. Small systems can use VAD-only endpointing instead.
     turn_detection: str = "multilingual"  # "multilingual" | "vad"
     # None preserves LiveKit's environment-specific default.
-    agent_idle_processes: Optional[int] = None
+    agent_idle_processes: int | None = None
     # Load managed children one at a time. This reduces temporary memory peaks
     # on small unified-memory devices such as Jetson Orin Nano.
     sequential_startup: bool = False
     log_level: str = "INFO"
 
     @classmethod
-    def from_env(cls) -> "Config":
+    def from_env(cls) -> Config:
         """Build the config from ``os.environ`` with sane defaults."""
         # Managed inference children listen on loopback, so nothing is reachable
         # off-box by default. BIND_HOST widens all three at once (0.0.0.0 for the
@@ -180,12 +179,7 @@ class Config:
 
         stt_provider = os.getenv("STT_PROVIDER", cls.stt_provider).lower()
         if stt_base_url is None:
-            # Default STT URL depends on provider
-            stt_base_url = (
-                "http://127.0.0.1:8000/v1"
-                if stt_provider != "whisper"
-                else "http://127.0.0.1:8000/v1"
-            )
+            stt_base_url = "http://127.0.0.1:8000/v1"
 
         default_stt_model = (
             "Systran/faster-whisper-small"
@@ -278,6 +272,7 @@ class Config:
             "WAKE_WORD_MODEL": self.wake_word_model,
             "WAKE_WORD_THRESHOLD": str(self.wake_word_threshold),
             "TTS_BASE_URL": self.tts_base_url,
+            "TTS_PROVIDER": self.tts_provider,
             "TTS_VOICE": self.tts_voice,
             "TTS_API_KEY": self.tts_api_key,
             "TURN_DETECTION": self.turn_detection,

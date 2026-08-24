@@ -18,6 +18,16 @@ class _FakeKokoro:
         assert lang == "en-us"
         return np.array([0.0, 0.25, -0.25], dtype=np.float32), 24_000
 
+    async def create_stream(self, text: str, *, voice: str, speed: float, lang: str):
+        audio, sample_rate = self.create(
+            text,
+            voice=voice,
+            speed=speed,
+            lang=lang,
+        )
+        yield audio[:2], sample_rate
+        yield audio[2:], sample_rate
+
 
 def test_uses_fp16_model() -> None:
     assert server.MODEL_URL.endswith("kokoro-v1.0.fp16.onnx")
@@ -59,3 +69,24 @@ async def test_speech_returns_wav(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert response.media_type == "audio/wav"
     assert response.body.startswith(b"RIFF")
+
+
+@pytest.mark.asyncio
+async def test_speech_streams_raw_pcm_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(server, "_kokoro", _FakeKokoro())
+
+    response = await server.speech(
+        server.SpeechRequest(
+            input="hello",
+            voice="af_nova",
+            speed=1.0,
+            response_format="pcm",
+        )
+    )
+    chunks = [chunk async for chunk in response.body_iterator]
+
+    assert response.media_type == "audio/pcm"
+    assert len(chunks) == 2
+    assert b"".join(chunks) == server._pcm16(
+        np.array([0.0, 0.25, -0.25], dtype=np.float32)
+    )

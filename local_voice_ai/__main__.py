@@ -127,7 +127,11 @@ def make_status_provider(supervisor: Supervisor, cfg: Config):
     cache = Path(os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache")))
     path_for_child = {
         "llama": hub / _hub_repo_dir(cfg.llama_hf_repo),
-        "nemotron": hub / _hub_repo_dir(cfg.nemotron_model_name),
+        "nemotron": (
+            cache / "nemo-speech"
+            if cfg.stt_provider == "nemotron-cpp"
+            else hub / _hub_repo_dir(cfg.nemotron_model_name)
+        ),
         "whisper": hub / _hub_repo_dir(cfg.whisper_model),
         "kokoro": (
             cache / "kokoro-onnx"
@@ -270,6 +274,22 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                         "DEVICE": cfg.stt_device or cfg.device,
                     },
                     ready_url=f"http://{probe_host(cfg.stt_bind_host)}:{cfg.stt_bind_port}/health",
+                    ready_timeout=600.0,
+                )
+            )
+        elif cfg.stt_provider == "nemotron-cpp":
+            specs.append(
+                ChildSpec(
+                    name="nemotron",
+                    argv=[
+                        py, "-m", "local_voice_ai.services.nemotron_cpp.launcher",
+                        "--host", cfg.stt_bind_host,
+                        "--port", str(cfg.stt_bind_port),
+                    ],
+                    ready_url=(
+                        f"http://{probe_host(cfg.stt_bind_host)}:"
+                        f"{cfg.stt_bind_port}/ready"
+                    ),
                     ready_timeout=600.0,
                 )
             )
@@ -452,6 +472,12 @@ def _download_models(cfg: Config) -> int:
         logger.info("downloading nemotron model %s", cfg.nemotron_model_name)
         import nemo.collections.asr as nemo_asr  # type: ignore[import]
         nemo_asr.models.ASRModel.from_pretrained(cfg.nemotron_model_name)
+
+    if cfg.manage_stt and cfg.stt_provider == "nemotron-cpp":
+        logger.info("downloading native quantized nemotron model")
+        from .services.nemotron_cpp.launcher import ensure_model
+
+        ensure_model()
 
     return 0
 

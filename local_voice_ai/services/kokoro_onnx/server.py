@@ -8,6 +8,7 @@ fit on small unified-memory devices such as Jetson Orin Nano.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import io
 import logging
 import os
@@ -20,7 +21,7 @@ import numpy as np
 import soundfile as sf
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 logger = logging.getLogger("kokoro-onnx")
@@ -35,6 +36,7 @@ MODEL_URL = os.getenv("KOKORO_ONNX_MODEL_URL", f"{_RELEASE}/kokoro-v1.0.fp16.onn
 VOICES_URL = os.getenv("KOKORO_ONNX_VOICES_URL", f"{_RELEASE}/voices-v1.0.bin")
 
 _kokoro = None
+_synthesis_lock = asyncio.Lock()
 
 
 def _cache_dir() -> Path:
@@ -106,6 +108,26 @@ def _encode(audio: np.ndarray, sample_rate: int, fmt: str) -> tuple[bytes, str]:
     return buf.getvalue(), "audio/wav"
 
 
+def _pcm16(audio: np.ndarray) -> bytes:
+    clipped = np.clip(np.asarray(audio, dtype=np.float32), -1.0, 1.0)
+    return (clipped * 32767.0).astype("<i2").tobytes()
+
+
+async def _stream_pcm(text: str, voice: str, speed: float):
+    if _kokoro is None:
+        raise RuntimeError("model not loaded")
+    # espeak-ng has process-global state. Serializing phonemization prevents
+    # concurrent requests from producing duplicated or reordered speech.
+    async with _synthesis_lock:
+        async for audio, _sample_rate in _kokoro.create_stream(
+            text,
+            voice=voice,
+            speed=speed,
+            lang=LANG,
+        ):
+            yield _pcm16(audio)
+
+
 @app.post("/v1/audio/speech")
 async def speech(req: SpeechRequest) -> Response:
     if _kokoro is None:
@@ -114,6 +136,12 @@ async def speech(req: SpeechRequest) -> Response:
         raise HTTPException(status_code=400, detail="input is required")
 
     voice = req.voice or DEFAULT_VOICE
+    if (req.response_format or "").lower() == "pcm":
+        return StreamingResponse(
+            _stream_pcm(req.input, voice, float(req.speed or 1.0)),
+            media_type="audio/pcm",
+            headers={"X-Sample-Rate": "24000"},
+        )
     try:
         audio, sample_rate = _synthesize(req.input, voice, float(req.speed or 1.0))
     except Exception as exc:

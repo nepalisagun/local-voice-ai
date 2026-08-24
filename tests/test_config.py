@@ -225,6 +225,6 @@ class TestAgentEnv:
             "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
             "LLAMA_BASE_URL", "LLAMA_MODEL", "LLAMA_API_KEY",
             "STT_BASE_URL", "STT_MODEL", "STT_API_KEY", "STT_PROVIDER",
-            "TTS_BASE_URL", "TTS_VOICE", "TTS_API_KEY", "TURN_DETECTION",
+            "TTS_BASE_URL", "TTS_PROVIDER", "TTS_VOICE", "TTS_API_KEY", "TURN_DETECTION",
         ):
             assert required in env, f"agent_env missing {required}"

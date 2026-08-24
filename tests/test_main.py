@@ -394,6 +394,16 @@ class TestWhisperSpec:
         names = [s.name for s in _build_specs(cfg)]
         assert "nemotron" in names and "whisper" not in names
 
+    def test_native_nemotron_uses_quantized_streaming_server(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("STT_PROVIDER", "nemotron-cpp")
+
+        spec = next(s for s in _build_specs(Config.from_env()) if s.name == "nemotron")
+
+        assert "local_voice_ai.services.nemotron_cpp.launcher" in spec.argv
+        assert spec.ready_url == "http://127.0.0.1:8000/ready"
+
     def test_sequential_startup_loads_stt_before_llama(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -97,6 +97,7 @@ async def my_agent(ctx: JobContext) -> None:
     stt_api_key = os.getenv("STT_API_KEY", "no-key-needed")
 
     tts_base_url = os.getenv("TTS_BASE_URL", "http://127.0.0.1:8880/v1")
+    tts_provider = os.getenv("TTS_PROVIDER", "kokoro").lower()
     tts_voice = os.getenv("TTS_VOICE", "af_nova")
     tts_api_key = os.getenv("TTS_API_KEY", "no-key-needed")
 
@@ -109,8 +110,20 @@ async def my_agent(ctx: JobContext) -> None:
     wake_word_model = os.getenv("WAKE_WORD_MODEL", "/app/models/wakeword/hey_livekit.onnx")
     wake_word_threshold = float(os.getenv("WAKE_WORD_THRESHOLD", "0.5"))
 
+    if stt_provider == "nemotron-cpp":
+        from .nemotron_stt import NemotronSTT
+
+        stt = NemotronSTT(
+            base_url=stt_base_url,
+            model=stt_model,
+            api_key=stt_api_key,
+            endpointing_ms=int(os.getenv("NEMOTRON_ENDPOINTING_MS", "300")),
+        )
+    else:
+        stt = openai.STT(base_url=stt_base_url, model=stt_model, api_key=stt_api_key)
+
     session = AgentSession(
-        stt=openai.STT(base_url=stt_base_url, model=stt_model, api_key=stt_api_key),
+        stt=stt,
         llm=openai.LLM(base_url=llama_base_url, model=llama_model, api_key=llama_api_key),
         # The model name selects the wire protocol the openai TTS plugin uses:
         # only {"tts-1", "tts-1-hd"} use the raw-audio-bytes stream that the
@@ -119,7 +132,15 @@ async def my_agent(ctx: JobContext) -> None:
         # body as text, pushes zero frames, and raises "no audio frames were
         # pushed". Kokoro ignores the model field, so "tts-1" is purely a
         # protocol selector here.
-        tts=openai.TTS(base_url=tts_base_url, model="tts-1", voice=tts_voice, api_key=tts_api_key),
+        tts=openai.TTS(
+            base_url=tts_base_url,
+            model="tts-1",
+            voice=tts_voice,
+            api_key=tts_api_key,
+            # Raw PCM lets the ONNX server deliver playable chunks without
+            # buffering a complete WAV or MP3 response first.
+            response_format="pcm" if tts_provider == "kokoro-onnx" else "mp3",
+        ),
         turn_detection=MultilingualModel() if MultilingualModel is not None else None,
         vad=ctx.proc.userdata["vad"],
         preemptive_generation=True,
