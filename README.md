@@ -116,6 +116,44 @@ Start the recommended profile with this command:
 python3 run.py start --profile auto --memory-gb 5.5
 ```
 
+#### Run the voice UI on another computer
+
+The browser does all UI work on the computer that opens the page. The Nano
+sends about 335 KB of first-load JavaScript when it serves the built-in UI.
+
+You can run the UI on a laptop and use the Nano as the voice server. This mode
+also gives the browser a `localhost` origin for microphone access.
+
+First, add these values to `.env.local` on the Nano. Replace the example IP
+address with the LAN address of the Nano.
+
+```env
+LIVEKIT_URL=ws://192.168.1.40:7880
+LIVEKIT_NODE_IP=192.168.1.40
+MANAGE_LIVEKIT=1
+```
+
+Then restart the Nano stack:
+
+```bash
+python3 run.py start --profile auto --memory-gb 5.5 --yes
+```
+
+On the laptop, use a checkout of this repository. Install Node.js. Then enable
+Corepack. Start the local client with the second command:
+
+```bash
+corepack enable
+python3 run.py client --server 192.168.1.40
+```
+
+Open <http://localhost:3000>. Then permit microphone access. The client command
+installs the frontend packages on its first run.
+
+The client must reach TCP ports `8080`, `7880`, and `7881` on the Nano. It must
+also reach UDP port `7882`. Do not expose these development ports to the public
+internet.
+
 To bypass the launcher, use both Compose files:
 
 ```bash
@@ -294,6 +332,7 @@ See `.env` for the full list. The most important ones:
 - `TTS_PROVIDER` (`kokoro`|`kokoro-onnx`), `TTS_BASE_URL`, `TTS_VOICE`
 - `TURN_DETECTION` (`multilingual`|`vad`) and `AGENT_IDLE_PROCESSES`; the lean Jetson profile uses `vad` and one idle process to reduce memory.
 - `WEB_PORT` (default `8080`)
+- `CLIENT_ORIGINS` — comma-separated HTTPS origins for separately hosted clients. Localhost client origins work by default.
 - `MANAGE_LIVEKIT`, `MANAGE_LLAMA`, `MANAGE_STT`, `MANAGE_TTS` — explicit overrides for the auto-detected "is the URL external?" logic.
 - `GATEWAY=1` — serve the OpenAI-compatible `/v1/*` API on the web port, proxied to the LLM/STT/TTS children. Off by default. See below.
 - `BIND_HOST` — where the managed LLM/STT/TTS children listen. Defaults to `127.0.0.1`, so they're loopback-only. See below.

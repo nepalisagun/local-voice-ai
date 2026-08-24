@@ -7,6 +7,7 @@ Examples:
     python run.py plan                    # show the resolved plan
     python run.py start --profile auto --yes
     python run.py start --profile compact --memory-gb 5.5 --yes
+    python run.py client --server 192.168.1.40
     python run.py status
     python run.py logs
     python run.py down
@@ -25,6 +26,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -44,6 +46,7 @@ from local_voice_ai.profiles import (
 )
 
 ROOT = Path(__file__).resolve().parent
+FRONTEND = ROOT / "frontend"
 SELECTION_PATH = ROOT / ".local-voice-ai.toml"
 LOCAL_ENV_PATH = ROOT / ".env.local"
 
@@ -70,6 +73,116 @@ def read_env_file(path: Path) -> dict[str, str]:
             value = value[1:-1]
         values[key] = value
     return values
+
+
+def _client_backend_url(value: str) -> str:
+    """Normalize a client server argument without accepting embedded credentials."""
+    value = value.strip()
+    if not value:
+        raise ValueError("the server address is empty")
+
+    had_scheme = "://" in value
+    candidate = value if had_scheme else f"http://{value}"
+    try:
+        parsed = urllib.parse.urlsplit(candidate)
+        # Accessing port validates malformed values such as ':not-a-port'.
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"invalid server address: {value}") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ValueError("the server must be an HTTP or HTTPS host")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("the server address must not contain credentials")
+    if parsed.query or parsed.fragment:
+        raise ValueError("the server address must not contain a query or fragment")
+
+    netloc = parsed.netloc
+    if not had_scheme and port is None:
+        netloc += ":8080"
+    path = parsed.path.rstrip("/")
+    return urllib.parse.urlunsplit((parsed.scheme, netloc, path, "", ""))
+
+
+def _client_api_url(backend_url: str, path: str) -> str:
+    return f"{backend_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _client_connection_details(backend_url: str) -> dict[str, object]:
+    request = urllib.request.Request(
+        _client_api_url(backend_url, "/api/connection-details"),
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5) as response:
+        data = json.load(response)
+    if not isinstance(data, dict):
+        raise ValueError("the server returned invalid connection details")
+    return data
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    return host in {"localhost", "127.0.0.1", "::1"}
+
+
+def _client(server: str, port: int) -> int:
+    try:
+        backend_url = _client_backend_url(server)
+        details = _client_connection_details(backend_url)
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        print(f"Cannot connect to Local Voice AI at {server}: {exc}")
+        return 1
+
+    advertised_url = details.get("serverUrl")
+    try:
+        advertised_host = urllib.parse.urlsplit(str(advertised_url)).hostname
+        backend_host = urllib.parse.urlsplit(backend_url).hostname
+    except ValueError:
+        advertised_host = None
+        backend_host = None
+    if not _is_loopback_host(backend_host) and _is_loopback_host(advertised_host):
+        print(
+            "The server is reachable, but LiveKit advertises a loopback address.\n"
+            f"On {backend_host}, set LIVEKIT_URL and LIVEKIT_NODE_IP to that machine's "
+            "LAN address, then restart it."
+        )
+        return 1
+
+    pnpm = shutil.which("pnpm")
+    if pnpm is None:
+        print("pnpm was not found. Install Node.js and enable Corepack, then try again.")
+        return 1
+
+    environment = dict(os.environ)
+    environment["NEXT_PUBLIC_BACKEND_URL"] = backend_url
+    if not (FRONTEND / "node_modules").is_dir():
+        print("Installing frontend dependencies on this computer…")
+        installed = _run(
+            [pnpm, "--dir", str(FRONTEND), "install", "--frozen-lockfile"],
+            environment=environment,
+        )
+        if installed.returncode != 0:
+            return installed.returncode
+
+    print(f"Connecting this computer to {backend_url}")
+    print(f"Open http://localhost:{port} and allow microphone access.\n")
+    try:
+        return _run(
+            [
+                pnpm,
+                "--dir",
+                str(FRONTEND),
+                "dev",
+                "--hostname",
+                "127.0.0.1",
+                "--port",
+                str(port),
+            ],
+            environment=environment,
+        ).returncode
+    except KeyboardInterrupt:
+        print("\nClient stopped.")
+        return 0
 
 
 def runtime_environment(
@@ -499,6 +612,17 @@ def _parser() -> argparse.ArgumentParser:
     _add_profile_arguments(start, include_yes=True)
     start.add_argument("--no-build", action="store_true", help="reuse the existing image")
 
+    client = subparsers.add_parser(
+        "client", help="run the voice UI here and connect it to another machine"
+    )
+    client.add_argument(
+        "--server",
+        required=True,
+        metavar="HOST_OR_URL",
+        help="server host (uses port 8080) or full HTTP URL",
+    )
+    client.add_argument("--port", type=int, default=3000, help="local UI port (default: 3000)")
+
     configure = subparsers.add_parser("configure", help="choose and save a startup profile")
     _add_profile_arguments(configure, include_yes=True)
 
@@ -593,6 +717,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _down()
     if args.command == "logs":
         return _logs()
+    if args.command == "client":
+        return _client(args.server, args.port)
 
     catalog = load_catalog(DEFAULT_CATALOG_PATH)
     hardware = detect_hardware()

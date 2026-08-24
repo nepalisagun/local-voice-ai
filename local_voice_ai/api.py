@@ -20,6 +20,7 @@ from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from livekit import api as lk_api
@@ -28,6 +29,12 @@ from starlette.background import BackgroundTask
 from .config import Config
 
 logger = logging.getLogger("api")
+
+# A frontend running on the user's own computer gets a secure-enough browser
+# context at localhost, so microphone access works without TLS. Keep this
+# narrower than CORS "*": arbitrary websites must not be able to mint tokens
+# for a Local Voice AI server on the user's LAN.
+_LOCAL_CLIENT_ORIGIN = r"^https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$"
 
 # Which backend serves each OpenAI route. Everything else under /v1 is a 404 —
 # an explicit table beats a catch-all that would silently forward typos to the
@@ -215,6 +222,13 @@ def build_app(
     status_provider: Callable[[], list[dict[str, Any]]] | None = None,
 ) -> FastAPI:
     app = FastAPI(title="local-voice-ai", version="0.1.0", lifespan=_gateway_lifespan(cfg))
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(cfg.client_origins),
+        allow_origin_regex=_LOCAL_CLIENT_ORIGIN,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type", "X-Sandbox-Id"],
+    )
 
     @app.get("/api/status")
     async def status() -> dict[str, Any]:

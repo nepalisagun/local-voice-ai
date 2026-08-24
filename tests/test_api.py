@@ -127,6 +127,47 @@ class TestConnectionDetails:
         assert len(rooms) >= 6
 
 
+class TestClientOrigins:
+    def test_local_client_can_request_a_connection_token(self, client: TestClient) -> None:
+        response = client.options(
+            "/api/connection-details",
+            headers={
+                "Origin": "http://localhost:3000",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "content-type,x-sandbox-id",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+    def test_unconfigured_remote_web_origin_is_not_allowed(self, client: TestClient) -> None:
+        response = client.options(
+            "/api/connection-details",
+            headers={
+                "Origin": "https://untrusted.example",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+        assert "access-control-allow-origin" not in response.headers
+
+    def test_configured_client_origin_is_allowed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CLIENT_ORIGINS", "https://voice.example, https://backup.example")
+        client = TestClient(build_app(Config.from_env()))
+
+        response = client.options(
+            "/api/connection-details",
+            headers={
+                "Origin": "https://voice.example",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["access-control-allow-origin"] == "https://voice.example"
+
+
 class TestStaticFrontend:
     @pytest.fixture
     def frontend_dir(self) -> Iterator[pathlib.Path]:

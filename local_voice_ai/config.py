@@ -37,6 +37,11 @@ def _env_int_opt(name: str) -> int | None:
     return int(raw) if raw else None
 
 
+def _env_csv(name: str) -> tuple[str, ...]:
+    raw = os.getenv(name, "")
+    return tuple(value.strip() for value in raw.split(",") if value.strip())
+
+
 _DEFAULT_BIND_HOST = "127.0.0.1"
 
 # Wildcard binds aren't connectable addresses — probe readiness over loopback.
@@ -63,6 +68,9 @@ class Config:
     web_host: str = "0.0.0.0"
     web_port: int = 8080
     frontend_dir: str | None = None  # path to a Next.js static export dir
+    # Extra browser origins allowed to call the token and status APIs. Localhost
+    # client apps are allowed separately by the API's narrow origin regex.
+    client_origins: tuple[str, ...] = ()
     # Expose the OpenAI-compatible /v1/* surface on the web port, proxied to the
     # LLM/STT/TTS children, so one URL serves everything and the children can
     # stay on loopback. Off by default: web_host is already 0.0.0.0 and the
@@ -191,6 +199,7 @@ class Config:
             web_host=os.getenv("WEB_HOST", cls.web_host),
             web_port=int(os.getenv("WEB_PORT", str(cls.web_port))),
             frontend_dir=os.getenv("FRONTEND_DIR"),
+            client_origins=_env_csv("CLIENT_ORIGINS"),
             gateway=_env_bool("GATEWAY", cls.gateway),
             #
             livekit_url=livekit_url,

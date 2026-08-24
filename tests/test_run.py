@@ -145,6 +145,52 @@ def test_read_env_file_handles_comments_export_and_quotes(tmp_path: Path) -> Non
     }
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("192.168.1.40", "http://192.168.1.40:8080"),
+        ("orin.local", "http://orin.local:8080"),
+        ("http://192.168.1.40:9000/", "http://192.168.1.40:9000"),
+        ("https://voice.example/base/", "https://voice.example/base"),
+    ],
+)
+def test_client_backend_url_normalizes_host_or_url(value: str, expected: str) -> None:
+    assert run_launcher._client_backend_url(value) == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "ftp://192.168.1.40", "http:///missing-host", "http://user:pass@orin.local"],
+)
+def test_client_backend_url_rejects_unsafe_or_invalid_values(value: str) -> None:
+    with pytest.raises(ValueError):
+        run_launcher._client_backend_url(value)
+
+
+def test_client_stops_cleanly_on_keyboard_interrupt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    frontend = tmp_path / "frontend"
+    (frontend / "node_modules").mkdir(parents=True)
+    monkeypatch.setattr(run_launcher, "FRONTEND", frontend)
+    monkeypatch.setattr(run_launcher.shutil, "which", lambda _name: "/usr/bin/pnpm")
+    monkeypatch.setattr(
+        run_launcher,
+        "_client_connection_details",
+        lambda _url: {"serverUrl": "ws://192.168.1.40:7880"},
+    )
+    monkeypatch.setattr(
+        run_launcher,
+        "_run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(KeyboardInterrupt),
+    )
+
+    assert run_launcher._client("192.168.1.40", 3000) == 0
+    assert "Client stopped" in capsys.readouterr().out
+
+
 def test_saved_budget_only_persists_a_manual_override() -> None:
     profile = _cuda_profile()
 

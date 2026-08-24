@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { getBackendUrl } from '@/lib/utils';
 
 export interface StackChild {
   name: string;
@@ -41,7 +42,7 @@ export function useStackStatus(): StackStatus {
     async function poll() {
       let next: StackStatus;
       try {
-        const res = await fetch('/api/status', { cache: 'no-store' });
+        const res = await fetch(getBackendUrl('/api/status'), { cache: 'no-store' });
         if (!res.ok) throw new Error(`status ${res.status}`);
         const data = await res.json();
         next = { ready: data.ready, children: data.children, wakeWord: !!data.wake_word };
