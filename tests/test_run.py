@@ -95,6 +95,13 @@ def test_jetson_compose_command_uses_jetpack_overlay() -> None:
     ]
 
 
+def test_compose_injects_optional_machine_overrides_into_the_container() -> None:
+    compose = (run_launcher.ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "path: .env.local" in compose
+    assert "required: false" in compose
+
+
 def test_supported_jetson_release_and_nvidia_runtime_pass_preflight_check() -> None:
     assert run_launcher.jetson_container_errors(_jetson_profile(), {"nvidia", "runc"}) == []
 

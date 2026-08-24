@@ -10,7 +10,12 @@ services:
         PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim}
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
     env_file:
-      - .env
+      - path: .env
+      # Per-machine settings must reach the container too. The launcher uses
+      # this file for Compose interpolation, but values such as MANAGE_LIVEKIT
+      # and LIVEKIT_NODE_IP are otherwise lost at the container boundary.
+      - path: .env.local
+        required: false
     environment:
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://127.0.0.1:7880}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
