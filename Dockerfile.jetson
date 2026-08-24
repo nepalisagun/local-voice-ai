@@ -59,11 +59,15 @@ FROM ${LIVEKIT_IMAGE} AS livekit-bin
 # ---------------- runtime ----------------
 FROM ${JETSON_PYTORCH_IMAGE} AS runtime
 
-# The upstream base points pip at a build-time Jetson package mirror. Use PyPI
-# for application dependencies, while retaining the base image's CUDA wheels.
+# The upstream base adds NVIDIA package indexes. Application dependencies come
+# from PyPI. Keep the Jetson CUDA wheels and cache downloaded wheels for rebuilds.
 ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_CACHE_DIR=/root/.cache/pip \
+    PIP_CACHE_PURGE=false \
+    PIP_CONFIG_FILE=/dev/null \
     PIP_INDEX_URL=https://pypi.org/simple \
+    PIP_NO_CACHE_DIR=false \
     PIP_VERBOSE=0 \
     SCP_UPLOAD_PASS= \
     SCP_UPLOAD_URL= \
@@ -90,7 +94,8 @@ COPY local_voice_ai ./local_voice_ai
 
 # A generic pip resolution must not silently replace NVIDIA's Jetson build of
 # torch with a CPU wheel. Fail the image build if that ever happens.
-RUN torch_version="$(python -c 'import torch; print(torch.__version__)')" \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    torch_version="$(python -c 'import torch; print(torch.__version__)')" \
     && torchaudio_version="$(python -c 'import torchaudio; print(torchaudio.__version__)')" \
     && python -m pip install ".[ml,whisper]" \
     && test "$(python -c 'import torch; print(torch.__version__)')" = "${torch_version}" \
