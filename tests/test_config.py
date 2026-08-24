@@ -43,6 +43,12 @@ class TestManageDefaults:
 
         assert Config.from_env().llama_ctx_size == 4096
 
+    def test_llama_parallelism_from_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLAMA_PARALLEL", "1")
+        assert Config.from_env().llama_parallel == 1
+
     def test_all_loopback_defaults_to_managed(self) -> None:
         cfg = Config.from_env()
         assert cfg.manage_livekit

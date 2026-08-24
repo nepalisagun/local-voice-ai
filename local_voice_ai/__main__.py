@@ -230,7 +230,11 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                     *(["--offline"] if offline else []),
                     "--alias", cfg.llama_model_alias,
                     "--ctx-size", str(cfg.llama_ctx_size),
+                    "--parallel", str(cfg.llama_parallel),
                     "--n-gpu-layers", str(cfg.llama_n_gpu_layers),
+                    # The voice UI has no image input. Avoid automatically
+                    # loading the repository's large vision projector.
+                    "--no-mmproj",
                     # Voice agent: thinking models (e.g. gemma-4) must answer
                     # directly — reasoning tokens are seconds of dead air
                     # before TTS gets any text.

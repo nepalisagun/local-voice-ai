@@ -54,8 +54,8 @@ The initial catalog has two conservative variants of the proven v2 stack:
 
 | Profile | Planning target | Configuration |
 |---|---:|---|
-| `compact` | about 5.5 GB | Gemma 4 E2B Q4 + Nemotron 0.6B FP16 + Kokoro, 4K context |
-| `balanced` | about 6.5 GB | Same models with a 16K context |
+| `compact` | about 5.5 GB | Gemma 4 E2B Q4 + Nemotron 0.6B FP16 + Kokoro, one 4K slot |
+| `balanced` | about 6.5 GB | Same models with one 16K slot |
 
 These numbers are planning targets, not hard limits; allocator, driver, and
 conversation state add workload-dependent overhead. Auto selection reserves
@@ -88,6 +88,9 @@ model appears in the response.
 The Jetson profile loads managed services one at a time. This avoids temporary
 memory spikes while Gemma, Nemotron, and Kokoro initialize in shared memory.
 After startup, all services remain loaded and run together.
+
+The voice UI uses one Gemma inference slot and does not load the repository's
+vision projector. These settings preserve memory for speech services.
 
 The image uses Python 3.12 and CUDA-enabled PyTorch 2.7. Its public
 [Jetson Containers](https://github.com/dusty-nv/jetson-containers) base is

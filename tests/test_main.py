@@ -429,6 +429,15 @@ class TestBindHost:
         assert spec.response_check(expected) is True
         assert spec.response_check(ollama) is False
 
+    def test_llama_voice_server_skips_vision_and_uses_configured_slots(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLAMA_PARALLEL", "1")
+        argv = _llama_spec().argv
+
+        assert "--no-mmproj" in argv
+        assert argv[argv.index("--parallel") + 1] == "1"
+
 
 class TestEnvFileLoading:
     """Bare-metal runs never read .env — only Docker did, via compose's
