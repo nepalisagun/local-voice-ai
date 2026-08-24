@@ -136,6 +136,10 @@ class TestProfileResolution:
         assert resolved.memory_budget_gib == 6.0
         assert resolved.environment["DEVICE"] == "cuda"
         assert resolved.environment["LLAMA_CTX_SIZE"] == "4096"
+        assert resolved.environment["JETSON_LLAMA_BASE_URL"] == (
+            "http://127.0.0.1:11435/v1"
+        )
+        assert resolved.environment["JETSON_LLAMA_BIND_PORT"] == "11435"
         assert resolved.platform.runtime == "docker"
         assert resolved.platform.compose_files == (
             "docker-compose.yml",

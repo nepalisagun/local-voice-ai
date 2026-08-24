@@ -14,6 +14,7 @@ import logging
 import os
 import signal
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import httpx
@@ -29,6 +30,7 @@ class ChildSpec:
     cwd: str | None = None
     ready_url: str | None = None
     ready_timeout: float = 180.0
+    response_check: Callable[[httpx.Response], bool] | None = None
     max_restarts: int = 5
     # Liveness polling of ready_url after the child comes up. A model process
     # can keep its socket open while every inference fails (e.g. a CUDA OOM
@@ -138,6 +140,18 @@ class Supervisor:
 
     # ---------------- internals ----------------
 
+    @staticmethod
+    def _response_succeeds(spec: ChildSpec, response: httpx.Response) -> bool:
+        if response.status_code >= 400:
+            return False
+        if spec.response_check is None:
+            return True
+        try:
+            return bool(spec.response_check(response))
+        except Exception:
+            logger.exception("[%s] response check failed", spec.name)
+            return False
+
     async def _start(self, child: _Child) -> None:
         env = {**os.environ, **child.spec.env}
         logger.info("[%s] starting: %s", child.spec.name, " ".join(child.spec.argv))
@@ -193,7 +207,7 @@ class Supervisor:
                 )
             try:
                 resp = await self._http.get(child.spec.ready_url)
-                if resp.status_code < 400:
+                if self._response_succeeds(child.spec, resp):
                     child.ready = True
                     logger.info("[%s] ready", child.spec.name)
                     self._start_health_monitor(child)
@@ -240,8 +254,12 @@ class Supervisor:
 
             try:
                 resp = await self._http.get(child.spec.ready_url)
-                healthy = resp.status_code < 400
-                detail = f"HTTP {resp.status_code}"
+                healthy = self._response_succeeds(child.spec, resp)
+                detail = (
+                    f"HTTP {resp.status_code}"
+                    if resp.status_code >= 400
+                    else "unexpected response"
+                )
             except (httpx.RequestError, httpx.HTTPError) as exc:
                 healthy = False
                 detail = str(exc) or type(exc).__name__

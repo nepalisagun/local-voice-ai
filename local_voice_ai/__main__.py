@@ -17,6 +17,7 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
 import uvicorn
 from dotenv import load_dotenv
 
@@ -94,6 +95,19 @@ def _dir_size(path: Path) -> int:
 def _hub_repo_dir(repo: str) -> str:
     """HF hub cache dir name for a repo id (tag/quant suffix stripped)."""
     return "models--" + repo.split(":", 1)[0].replace("/", "--")
+
+
+def _model_list_includes(response: httpx.Response, expected_model: str) -> bool:
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        return False
+    return any(
+        isinstance(model, dict) and model.get("id") == expected_model
+        for model in payload["data"]
+    )
 
 
 def make_status_provider(supervisor: Supervisor, cfg: Config):
@@ -220,6 +234,9 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                 env=llama_env,
                 ready_url=f"http://{probe_host(cfg.llama_bind_host)}:{cfg.llama_bind_port}/v1/models",
                 ready_timeout=900.0,  # first-run model download can be slow
+                response_check=lambda response, expected=cfg.llama_model_alias: (
+                    _model_list_includes(response, expected)
+                ),
             )
         )
 

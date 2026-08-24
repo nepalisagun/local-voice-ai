@@ -73,6 +73,25 @@ class TestSpawnAndReady:
             await sup.shutdown(timeout=3.0)
 
     @pytest.mark.asyncio
+    async def test_successful_http_response_must_pass_the_child_check(self) -> None:
+        port = _free_port()
+        spec = ChildSpec(
+            name="expected-service",
+            argv=[sys.executable, "-c", _HTTP_STUB, str(port)],
+            ready_url=f"http://127.0.0.1:{port}/",
+            ready_timeout=0.5,
+            response_check=lambda response: response.text == "expected",
+        )
+        sup = Supervisor([spec])
+
+        try:
+            with pytest.raises(TimeoutError):
+                await sup.start_all()
+            assert sup.status()[0]["ready"] is False
+        finally:
+            await sup.shutdown(timeout=3.0)
+
+    @pytest.mark.asyncio
     async def test_status_reflects_readiness(self) -> None:
         port = _free_port()
         sup = Supervisor([_http_child("a", port)])

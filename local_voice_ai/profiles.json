@@ -87,7 +87,9 @@
       "supported_l4t_versions": ["36.4"],
       "environment": {
         "DEVICE": "cuda",
-        "LLAMA_N_GPU_LAYERS": "999"
+        "LLAMA_N_GPU_LAYERS": "999",
+        "JETSON_LLAMA_BASE_URL": "http://127.0.0.1:11435/v1",
+        "JETSON_LLAMA_BIND_PORT": "11435"
       }
     },
     "jetson": {
@@ -102,7 +104,9 @@
       "supported_l4t_versions": ["36.4"],
       "environment": {
         "DEVICE": "cuda",
-        "LLAMA_N_GPU_LAYERS": "999"
+        "LLAMA_N_GPU_LAYERS": "999",
+        "JETSON_LLAMA_BASE_URL": "http://127.0.0.1:11435/v1",
+        "JETSON_LLAMA_BIND_PORT": "11435"
       }
     }
   }

@@ -395,6 +395,22 @@ class TestBindHost:
         spec = _llama_spec()
         assert spec.ready_url == "http://192.168.1.50:11434/v1/models"
 
+    def test_llama_readiness_requires_the_expected_model(self) -> None:
+        spec = _llama_spec()
+        assert spec.response_check is not None
+
+        expected = httpx.Response(
+            200,
+            json={"object": "list", "data": [{"id": "gemma-4-e2b"}]},
+        )
+        ollama = httpx.Response(
+            200,
+            json={"object": "list", "data": [{"id": "qwen3:1.7b"}]},
+        )
+
+        assert spec.response_check(expected) is True
+        assert spec.response_check(ollama) is False
+
 
 class TestEnvFileLoading:
     """Bare-metal runs never read .env — only Docker did, via compose's
