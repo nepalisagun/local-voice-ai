@@ -32,19 +32,38 @@ def render_plan(profile: ResolvedProfile) -> str:
         "Local Voice Agent setup",
         "=" * 54,
         f"Detected   {hardware.device_name} ({hardware.system}/{hardware.machine})",
-        f"Memory     {memory}",
-        f"Runtime    {profile.platform.label} · {profile.platform.runtime}",
-        "",
-        f"Recommended  {profile.model.label}"
-        if profile.automatic
-        else f"Selected     {profile.model.label}",
-        f"  LLM       {profile.model.llm}",
-        f"  Speech    {profile.model.stt}",
-        f"  Voice     {profile.model.tts}",
-        f"  Target    about {profile.model.target_memory_gib:.1f} GB resident memory",
-        f"  Download  about {profile.model.download_gib:.1f} GB on first run",
-        f"  Why       {profile.model.description}",
     ]
+    release = " · ".join(
+        detail
+        for detail in (
+            f"JetPack {hardware.jetpack_version}" if hardware.jetpack_version else "",
+            f"L4T {hardware.l4t_version}" if hardware.l4t_version else "",
+        )
+        if detail
+    )
+    if release:
+        lines.append(f"Platform   {release}")
+    lines.extend(
+        [
+            f"Memory     {memory}",
+            f"Runtime    {profile.platform.label} · {profile.platform.runtime}",
+            "",
+            f"Recommended  {profile.model.label}"
+            if profile.automatic
+            else f"Selected     {profile.model.label}",
+            f"  LLM       {profile.model.llm}",
+            f"  Speech    {profile.model.stt}",
+            f"  Voice     {profile.model.tts}",
+            f"  Target    about {profile.model.target_memory_gib:.1f} GB resident memory",
+            f"  Weights   about {profile.model.download_gib:.1f} GB on first run",
+        ]
+    )
+    if profile.platform.container_download_gib:
+        lines.append(
+            f"  Image     about {profile.platform.container_download_gib:.1f} GB compressed "
+            "on first build"
+        )
+    lines.append(f"  Why       {profile.model.description}")
     if profile.warning:
         lines.extend(["", f"Warning: {profile.warning}"])
     return "\n".join(lines)

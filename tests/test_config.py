@@ -38,6 +38,11 @@ class TestIsLoopback:
 
 
 class TestManageDefaults:
+    def test_compact_context_is_the_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("LLAMA_CTX_SIZE", raising=False)
+
+        assert Config.from_env().llama_ctx_size == 4096
+
     def test_all_loopback_defaults_to_managed(self) -> None:
         cfg = Config.from_env()
         assert cfg.manage_livekit

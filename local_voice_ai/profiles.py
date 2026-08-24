@@ -10,6 +10,7 @@ import json
 import math
 import os
 import platform
+import re
 import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -28,6 +29,8 @@ class HardwareInfo:
     memory_topology: str
     total_memory_gib: float
     accelerator_memory_gib: float | None = None
+    jetpack_version: str | None = None
+    l4t_version: str | None = None
 
     @property
     def memory_capacity_gib(self) -> float:
@@ -73,6 +76,10 @@ class PlatformProfile:
     compose_files: tuple[str, ...]
     max_profile: str | None
     environment: Mapping[str, str]
+    container_download_gib: float = 0.0
+    disk_overhead_gib: float = 3.0
+    supported_jetpack_versions: tuple[str, ...] = ()
+    supported_l4t_versions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -111,6 +118,14 @@ def _string_map(raw: object, field_name: str) -> dict[str, str]:
     return {str(key): str(value) for key, value in raw.items()}
 
 
+def _string_tuple(raw: object, field_name: str) -> tuple[str, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError(f"{field_name} must be an array")
+    return tuple(str(value) for value in raw)
+
+
 def load_catalog(path: Path = DEFAULT_CATALOG_PATH) -> ProfileCatalog:
     with path.open(encoding="utf-8") as source:
         raw = json.load(source)
@@ -144,6 +159,16 @@ def load_catalog(path: Path = DEFAULT_CATALOG_PATH) -> ProfileCatalog:
             compose_files=tuple(str(item) for item in compose_files),
             max_profile=str(values["max_profile"]) if values.get("max_profile") else None,
             environment=_string_map(values.get("environment"), f"platforms.{key}.environment"),
+            container_download_gib=float(values.get("container_download_gib", 0.0)),
+            disk_overhead_gib=float(values.get("disk_overhead_gib", 3.0)),
+            supported_jetpack_versions=_string_tuple(
+                values.get("supported_jetpack_versions"),
+                f"platforms.{key}.supported_jetpack_versions",
+            ),
+            supported_l4t_versions=_string_tuple(
+                values.get("supported_l4t_versions"),
+                f"platforms.{key}.supported_l4t_versions",
+            ),
         )
 
     if not models or not platforms:
@@ -219,6 +244,23 @@ def _nvidia_device(raw: str | None) -> tuple[str, float] | None:
         return None
 
 
+def _jetpack_version(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    match = re.search(r"(?<!\d)(\d+\.\d+(?:\.\d+)?)(?!\d)", raw)
+    return match.group(1) if match else None
+
+
+def _l4t_version(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    release = re.search(r"\bR(\d+)\b", raw)
+    revision = re.search(r"\bREVISION:\s*([\d.]+)", raw)
+    if release is None or revision is None:
+        return None
+    return f"{release.group(1)}.{revision.group(1)}"
+
+
 def detect_hardware(
     *,
     system: str | None = None,
@@ -235,6 +277,8 @@ def detect_hardware(
     device_tree_model = read_text("/proc/device-tree/model") if system == "Linux" else None
     if device_tree_model and "jetson" in device_tree_model.lower():
         platform_key = "jetson-orin-nano" if "orin nano" in device_tree_model.lower() else "jetson"
+        jetpack_version = _jetpack_version(command_output(["dpkg-query", "-W", "nvidia-jetpack"]))
+        l4t_version = _l4t_version(read_text("/etc/nv_tegra_release"))
         return HardwareInfo(
             system=system,
             machine=machine,
@@ -243,6 +287,8 @@ def detect_hardware(
             accelerator="cuda",
             memory_topology="shared",
             total_memory_gib=total_memory_gib,
+            jetpack_version=jetpack_version,
+            l4t_version=l4t_version,
         )
 
     if system == "Darwin" and machine.lower() in {"arm64", "aarch64"}:

@@ -40,10 +40,16 @@ class TestHardwareDetection:
             system="Linux",
             machine="aarch64",
             total_memory_bytes=8 * GiB,
-            command_output=_commands({}),
+            command_output=_commands(
+                {"dpkg-query -W nvidia-jetpack": "nvidia-jetpack\t6.2.1+b38"}
+            ),
             read_text=_files(
                 {
                     "/proc/device-tree/model": "NVIDIA Jetson Orin Nano Engineering Reference Developer Kit\x00",
+                    "/etc/nv_tegra_release": (
+                        "# R36 (release), REVISION: 4.3, GCID: 38968081, BOARD: generic, "
+                        "EABI: aarch64"
+                    ),
                 }
             ),
         )
@@ -53,6 +59,8 @@ class TestHardwareDetection:
         assert hardware.memory_topology == "shared"
         assert hardware.total_memory_gib == 8.0
         assert hardware.inference_budget_gib == 6.0
+        assert hardware.jetpack_version == "6.2.1"
+        assert hardware.l4t_version == "36.4.3"
 
     def test_apple_silicon_is_shared_metal_memory(self) -> None:
         hardware = detect_hardware(
@@ -128,7 +136,13 @@ class TestProfileResolution:
         assert resolved.memory_budget_gib == 6.0
         assert resolved.environment["DEVICE"] == "cuda"
         assert resolved.environment["LLAMA_CTX_SIZE"] == "4096"
-        assert resolved.platform.runtime == "native"
+        assert resolved.platform.runtime == "docker"
+        assert resolved.platform.compose_files == (
+            "docker-compose.yml",
+            "docker-compose.jetson.yml",
+        )
+        assert resolved.platform.supported_jetpack_versions == ("6.2",)
+        assert resolved.platform.supported_l4t_versions == ("36.4",)
 
     def test_sixteen_gb_apple_silicon_recommends_balanced(self, catalog) -> None:
         hardware = HardwareInfo(

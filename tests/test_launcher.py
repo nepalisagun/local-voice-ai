@@ -22,6 +22,8 @@ def _jetson() -> HardwareInfo:
         accelerator="cuda",
         memory_topology="shared",
         total_memory_gib=8.0,
+        jetpack_version="6.2.1",
+        l4t_version="36.4.3",
     )
 
 
@@ -36,6 +38,10 @@ def test_plan_explains_shared_memory_and_models() -> None:
     assert "Gemma 4 E2B" in rendered
     assert "Nemotron Speech 0.6B" in rendered
     assert "Kokoro" in rendered
+    assert "JetPack 6.2.1" in rendered
+    assert "L4T 36.4.3" in rendered
+    assert "docker" in rendered
+    assert "5.9 GB compressed" in rendered
 
 
 def test_enter_accepts_recommendation() -> None:

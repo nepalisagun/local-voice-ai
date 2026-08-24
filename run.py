@@ -190,11 +190,74 @@ def _native_python_version_error(python: Path) -> str | None:
     return None
 
 
+def _matches_release(version: str, supported: Sequence[str]) -> bool:
+    return any(version == release or version.startswith(release + ".") for release in supported)
+
+
+def _docker_runtime_names(raw: str) -> set[str]:
+    try:
+        runtimes = json.loads(raw)
+    except json.JSONDecodeError:
+        return set()
+    if not isinstance(runtimes, dict):
+        return set()
+    return {str(name) for name in runtimes}
+
+
+def jetson_container_errors(
+    profile: ResolvedProfile,
+    docker_runtimes: set[str],
+) -> list[str]:
+    """Validate the host facts on which the pinned Jetson image depends."""
+    if not profile.hardware.platform_key.startswith("jetson"):
+        return []
+
+    hardware = profile.hardware
+    platform_profile = profile.platform
+    errors: list[str] = []
+    if hardware.jetpack_version is None and hardware.l4t_version is None:
+        errors.append(
+            "the JetPack/L4T release could not be detected from nvidia-jetpack or "
+            "/etc/nv_tegra_release"
+        )
+    if (
+        hardware.jetpack_version is not None
+        and platform_profile.supported_jetpack_versions
+        and not _matches_release(
+            hardware.jetpack_version,
+            platform_profile.supported_jetpack_versions,
+        )
+    ):
+        supported = ", ".join(platform_profile.supported_jetpack_versions)
+        errors.append(
+            f"JetPack {hardware.jetpack_version} is unsupported by the Jetson image. "
+            f"The image supports {supported}"
+        )
+    if (
+        hardware.l4t_version is not None
+        and platform_profile.supported_l4t_versions
+        and not _matches_release(
+            hardware.l4t_version,
+            platform_profile.supported_l4t_versions,
+        )
+    ):
+        supported = ", ".join(platform_profile.supported_l4t_versions)
+        errors.append(
+            f"L4T {hardware.l4t_version} is unsupported by the Jetson image. "
+            f"The image supports {supported}"
+        )
+    if "nvidia" not in docker_runtimes:
+        errors.append(
+            "Docker's nvidia runtime is unavailable. Install or repair nvidia-container-runtime"
+        )
+    return errors
+
+
 def preflight(profile: ResolvedProfile, environment: Mapping[str, str]) -> list[str]:
     """Return actionable startup blockers without changing the machine."""
     errors: list[str] = []
     free_gib = shutil.disk_usage(ROOT).free / 1024**3
-    required_disk_gib = profile.model.download_gib + 3.0
+    required_disk_gib = profile.model.download_gib + profile.platform.disk_overhead_gib
     if free_gib < required_disk_gib:
         errors.append(
             f"only {free_gib:.1f} GB disk space is free; allow at least "
@@ -206,12 +269,30 @@ def preflight(profile: ResolvedProfile, environment: Mapping[str, str]) -> list[
             errors.append("Docker was not found on PATH")
             return errors
         try:
-            docker_info = _run(["docker", "info"], capture=True, timeout=15)
+            docker_info = _run(
+                ["docker", "info", "--format", "{{json .Runtimes}}"],
+                capture=True,
+                timeout=15,
+            )
         except subprocess.TimeoutExpired:
             errors.append("Docker did not respond within 15 seconds")
         else:
             if docker_info.returncode != 0:
                 errors.append("the Docker daemon is not reachable")
+            elif profile.hardware.platform_key.startswith("jetson"):
+                errors.extend(
+                    jetson_container_errors(
+                        profile,
+                        _docker_runtime_names(docker_info.stdout),
+                    )
+                )
+        try:
+            compose_version = _run(["docker", "compose", "version"], capture=True, timeout=15)
+        except subprocess.TimeoutExpired:
+            errors.append("Docker Compose did not respond within 15 seconds")
+        else:
+            if compose_version.returncode != 0:
+                errors.append("the Docker Compose plugin is unavailable")
         if profile.hardware.platform_key == "nvidia-cuda" and shutil.which("nvidia-smi") is None:
             errors.append("nvidia-smi is unavailable; install the NVIDIA driver first")
         return errors
@@ -332,11 +413,6 @@ def _start(profile: ResolvedProfile, *, build: bool = True) -> int:
         print("\nCannot start yet:")
         for blocker in blockers:
             print(f"  - {blocker}")
-        if profile.hardware.platform_key.startswith("jetson"):
-            print(
-                "\nJetson needs the NVIDIA PyTorch build matched to its JetPack release; "
-                "the desktop CUDA Compose image is intentionally not used."
-            )
         return 1
 
     if profile.platform.runtime == "docker":

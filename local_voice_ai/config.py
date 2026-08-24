@@ -97,7 +97,7 @@ class Config:
     # See https://github.com/ShayneP/local-voice-ai/issues/9
     llama_offline: Optional[bool] = None
     llama_model_alias: str = "gemma-4-e2b"
-    llama_ctx_size: int = 16384
+    llama_ctx_size: int = 4096
     llama_n_gpu_layers: int = 0
     llama_bind_port: int = 11434
     llama_bind_host: str = _DEFAULT_BIND_HOST

@@ -77,10 +77,14 @@
     },
     "jetson-orin-nano": {
       "label": "Jetson Orin Nano",
-      "description": "Native JetPack execution using the device's unified CPU/GPU memory.",
-      "runtime": "native",
-      "compose_files": [],
+      "description": "JetPack-aware container execution using the device's unified CPU/GPU memory.",
+      "runtime": "docker",
+      "compose_files": ["docker-compose.yml", "docker-compose.jetson.yml"],
       "max_profile": "compact",
+      "container_download_gib": 5.9,
+      "disk_overhead_gib": 24.0,
+      "supported_jetpack_versions": ["6.2"],
+      "supported_l4t_versions": ["36.4"],
       "environment": {
         "DEVICE": "cuda",
         "LLAMA_N_GPU_LAYERS": "999"
@@ -88,9 +92,14 @@
     },
     "jetson": {
       "label": "NVIDIA Jetson",
-      "description": "Native JetPack execution using the device's unified CPU/GPU memory.",
-      "runtime": "native",
-      "compose_files": [],
+      "description": "JetPack-aware container execution using the device's unified CPU/GPU memory.",
+      "runtime": "docker",
+      "compose_files": ["docker-compose.yml", "docker-compose.jetson.yml"],
+      "max_profile": "compact",
+      "container_download_gib": 5.9,
+      "disk_overhead_gib": 24.0,
+      "supported_jetpack_versions": ["6.2"],
+      "supported_l4t_versions": ["36.4"],
       "environment": {
         "DEVICE": "cuda",
         "LLAMA_N_GPU_LAYERS": "999"

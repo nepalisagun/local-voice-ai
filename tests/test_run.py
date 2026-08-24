@@ -31,6 +31,21 @@ def _cuda_profile():
     return resolve_profile(load_catalog(DEFAULT_CATALOG_PATH), hardware, requested="compact")
 
 
+def _jetson_profile(*, jetpack: str = "6.2.1", l4t: str = "36.4.3"):
+    hardware = HardwareInfo(
+        system="Linux",
+        machine="aarch64",
+        platform_key="jetson-orin-nano",
+        device_name="NVIDIA Jetson Orin Nano",
+        accelerator="cuda",
+        memory_topology="shared",
+        total_memory_gib=7.4,
+        jetpack_version=jetpack,
+        l4t_version=l4t,
+    )
+    return resolve_profile(load_catalog(DEFAULT_CATALOG_PATH), hardware, requested="compact")
+
+
 def test_runtime_environment_precedence() -> None:
     profile = _cuda_profile()
 
@@ -61,6 +76,58 @@ def test_compose_command_uses_platform_overlays() -> None:
         "up",
         "-d",
         "--build",
+    ]
+
+
+def test_jetson_compose_command_uses_jetpack_overlay() -> None:
+    command = run_launcher.compose_command(_jetson_profile(), "up", "-d", "--build")
+
+    assert command == [
+        "docker",
+        "compose",
+        "-f",
+        "docker-compose.yml",
+        "-f",
+        "docker-compose.jetson.yml",
+        "up",
+        "-d",
+        "--build",
+    ]
+
+
+def test_supported_jetson_release_and_nvidia_runtime_pass_preflight_check() -> None:
+    assert run_launcher.jetson_container_errors(_jetson_profile(), {"nvidia", "runc"}) == []
+
+
+def test_docker_runtime_parser_accepts_jetson_docker_info_output() -> None:
+    raw = (
+        '{"io.containerd.runc.v2":{"path":"runc"},'
+        '"nvidia":{"path":"nvidia-container-runtime"},'
+        '"runc":{"path":"runc"}}'
+    )
+
+    assert run_launcher._docker_runtime_names(raw) == {
+        "io.containerd.runc.v2",
+        "nvidia",
+        "runc",
+    }
+
+
+def test_jetson_container_check_explains_an_unsupported_l4t_release() -> None:
+    errors = run_launcher.jetson_container_errors(
+        _jetson_profile(jetpack="6.0", l4t="36.3.0"),
+        {"nvidia", "runc"},
+    )
+
+    assert any("L4T 36.3.0" in error and "36.4" in error for error in errors)
+    assert any("JetPack 6.0" in error and "6.2" in error for error in errors)
+
+
+def test_jetson_container_check_requires_nvidia_docker_runtime() -> None:
+    errors = run_launcher.jetson_container_errors(_jetson_profile(), {"runc"})
+
+    assert errors == [
+        "Docker's nvidia runtime is unavailable. Install or repair nvidia-container-runtime"
     ]
 
 

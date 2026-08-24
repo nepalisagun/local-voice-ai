@@ -31,8 +31,8 @@ python3 run.py
 ```
 
 The setup launcher supports Python 3.10+, including Jetson's system Python.
-The supervised application runtime still requires Python 3.11–3.13; native
-startup checks this separately and reports a clear preflight error.
+The supervised application runtime still requires Python 3.11–3.13. Native
+startup checks this requirement separately and reports a clear error.
 
 On the first run it detects Apple Silicon, a desktop NVIDIA GPU, Jetson, or CPU;
 accounts for unified versus discrete memory; and recommends a model profile.
@@ -67,17 +67,39 @@ The model and platform definitions live in
 model profiles decide weights, context, and estimated memory. Shell variables
 and `.env.local` still override profile values.
 
-### Jetson
+### Jetson Orin
 
-Jetson is detected separately from a desktop NVIDIA GPU because its GPU shares
-system RAM and its PyTorch build must match JetPack. The launcher chooses the
-native JetPack path and verifies CUDA-enabled PyTorch, `llama-server`, and
-`livekit-server` before starting. It deliberately does not apply the desktop
-`docker-compose.gpu.yml` image to Jetson. A fully automated JetPack container is
-still needed. Jetson's Python 3.10 can run the setup screen but not the current
-application environment; until the container exists, native startup needs a
-Python 3.11–3.13 environment with dependencies compatible with the installed
-JetPack release.
+The Jetson profile supports JetPack 6.2.x and L4T 36.4.x. The launcher reads
+both release values from the device. It also makes sure that Docker has the
+`nvidia` runtime.
+
+The launcher selects `docker-compose.jetson.yml` for a supported Jetson. This
+overlay uses the shared GPU memory and compiles llama.cpp for Orin (SM 8.7).
+It does not use the desktop CUDA image.
+
+The image uses Python 3.12 and CUDA-enabled PyTorch 2.7. Its public
+[Jetson Containers](https://github.com/dusty-nv/jetson-containers) base is
+pinned by digest. Thus, an NGC account is not necessary.
+
+The first build downloads approximately 5.9 GB for the base image. The models
+use approximately 4.2 GB. Keep at least 29 GB of free disk space for the image,
+models, and build cache. An external SSD gives better build and model-load
+performance than a microSD card.
+
+Start the recommended profile with this command:
+
+```bash
+python3 run.py start --profile auto --memory-gb 5.5
+```
+
+To bypass the launcher, use both Compose files:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.jetson.yml up -d --build
+```
+
+The host Python 3.10 process only runs the launcher. The application runs in
+the Python 3.12 container.
 
 ### Direct container run
 
@@ -98,7 +120,7 @@ docker compose up --build
 
 Open <http://localhost:8080>. The first boot downloads the Nemotron + LLM weights — the page shows per-service progress with download sizes, and the terminal logs a compact status heartbeat plus an unmissable “ready” banner when everything is up. Weights are cached in the `models` volume, so later boots are fast and work offline.
 
-### GPU (NVIDIA)
+### Desktop NVIDIA GPU
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
@@ -213,8 +235,10 @@ LLAMA_N_GPU_LAYERS=999 DEVICE=cuda .venv/bin/python -m local_voice_ai serve
 ├─ tests/                  # pytest suite
 ├─ run.py                  # first-run wizard + start/status/log controls
 ├─ Dockerfile              # multi-stage build
+├─ Dockerfile.jetson       # JetPack 6.2 / Orin CUDA build
 ├─ docker-compose.yml      # one service (CPU default)
 ├─ docker-compose.gpu.yml  # NVIDIA overlay: CUDA build + GPU reservation
+├─ docker-compose.jetson.yml # Jetson Orin overlay
 ├─ .github/workflows/      # CI: tests + multi-arch image publish to GHCR
 └─ pyproject.toml          # one Python package, one venv
 ```
