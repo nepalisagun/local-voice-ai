@@ -36,7 +36,9 @@ RUN git init \
     && git checkout --detach FETCH_HEAD
 
 # Orin is SM 8.7. A two-job build avoids exhausting an 8 GB Nano while still
-# compiling on-device in a reasonable amount of time.
+# compiling on-device in a reasonable amount of time. The NVIDIA runtime mounts
+# Jetson driver libraries only when the container starts, so do not execute the
+# CUDA binary during the image build.
 RUN cmake -S . -B build \
         -DBUILD_SHARED_LIBS=OFF \
         -DCMAKE_BUILD_TYPE=Release \
@@ -50,7 +52,7 @@ RUN cmake -S . -B build \
         -DLLAMA_BUILD_UI=OFF \
         -DLLAMA_OPENSSL=ON \
     && cmake --build build --target llama-server --parallel 2 \
-    && build/bin/llama-server --version
+    && test -x build/bin/llama-server
 
 FROM ${LIVEKIT_IMAGE} AS livekit-bin
 
