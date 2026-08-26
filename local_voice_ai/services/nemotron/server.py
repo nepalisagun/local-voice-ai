@@ -22,6 +22,8 @@ import uvicorn
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 
+from .degradation import DegradationTracker
+
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 logger = logging.getLogger("stt-server")
@@ -35,61 +37,24 @@ TARGET_SAMPLE_RATE = 16000
 
 asr_model = None
 
-# Set when the model is judged unrecoverable; surfaced as 503 from /health so
-# the supervisor restarts this process. Nothing clears it in-process — that is
-# the point: an OOM here is not recoverable without a fresh CUDA context.
-_degraded: str | None = None
-_consecutive_failures = 0
-
-# A CUDA OOM does not just fail one request. It aborts NeMo's RNNT CUDA-graph
-# capture and leaves the decoder holding a None where the graph belongs, so
-# every later call dies with "'NoneType' object has no attribute 'replay'"
-# even once memory is free again. Both spellings therefore mean "restart me".
-_FATAL_ERROR_MARKERS = (
-    "cuda out of memory",
-    "no attribute 'replay'",
-    "cuda error",
-    "device-side assert",
-    "cublas",
-    "illegal memory access",
-)
-
-# Tolerance for one-off failures that are not obviously fatal (a corrupt clip,
-# a transient allocation hiccup). Only a run of them with no success between
-# is treated as a broken model.
-_MAX_CONSECUTIVE_FAILURES = 3
-
-
-def _is_fatal(error: BaseException) -> bool:
-    """Whether ``error`` means the loaded model can never serve again."""
-    if isinstance(error, torch.cuda.OutOfMemoryError):
-        return True
-    text = str(error).lower()
-    return any(marker in text for marker in _FATAL_ERROR_MARKERS)
+# A CUDA OOM leaves NeMo's decoder unable to serve later requests. Keep this
+# state separate from the ML runtime so CI can test the restart policy without
+# installing Torch and NeMo.
+_degradation = DegradationTracker(fatal_error_types=(torch.cuda.OutOfMemoryError,))
 
 
 def _note_failure(error: BaseException) -> None:
     """Record a transcription failure, degrading the process if warranted."""
-    global _degraded, _consecutive_failures
-    _consecutive_failures += 1
-    if _degraded is not None:
-        return
-    if _is_fatal(error):
-        _degraded = f"unrecoverable inference error: {error}"
-    elif _consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
-        _degraded = (
-            f"{_consecutive_failures} consecutive transcription failures; "
-            f"last error: {error}"
+    if _degradation.note_failure(error):
+        logger.error(
+            "model degraded, reporting unhealthy for restart: %s",
+            _degradation.degraded,
         )
-    else:
-        return
-    logger.error("model degraded, reporting unhealthy for restart: %s", _degraded)
 
 
 def _note_success() -> None:
     """Clear the transient-failure run after a transcription succeeds."""
-    global _consecutive_failures
-    _consecutive_failures = 0
+    _degradation.note_success()
 
 
 def load_model():
@@ -430,13 +395,13 @@ async def health():
     answering "ok" while every transcription 500'd. Returning 503 once the
     model is known-broken lets the supervisor restart us.
     """
-    if _degraded is not None:
+    if _degradation.degraded is not None:
         raise HTTPException(
             status_code=503,
             detail={
                 "status": "degraded",
-                "reason": _degraded,
-                "failures": _consecutive_failures,
+                "reason": _degradation.degraded,
+                "failures": _degradation.consecutive_failures,
             },
         )
     return {"status": "ok", "model_loaded": asr_model is not None}
