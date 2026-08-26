@@ -22,7 +22,12 @@ from livekit.agents import (
     function_tool,
 )
 from livekit.plugins import openai, silero
-from livekit.plugins.turn_detector.multilingual import MultilingualModel
+
+_TURN_DETECTION = os.getenv("TURN_DETECTION", "multilingual").strip().lower()
+if _TURN_DETECTION == "multilingual":
+    from livekit.plugins.turn_detector.multilingual import MultilingualModel
+else:
+    MultilingualModel = None  # type: ignore[misc,assignment]
 
 logger = logging.getLogger("agent")
 
@@ -38,6 +43,7 @@ class Assistant(Agent):
                 "users with their questions by providing information from your extensive "
                 "knowledge. Your responses are concise, to the point, and without any "
                 "emojis, lists, or other special symbols. "
+                "Use short sentences so spoken audio can begin quickly. "
                 "You are curious, friendly, and have a sense of humor."
             ),
         )
@@ -58,7 +64,10 @@ class Assistant(Agent):
         return f"The product of {number1} and {number2} is {number1 * number2}."
 
 
-server = AgentServer()
+_idle_processes = os.getenv("AGENT_IDLE_PROCESSES")
+server = AgentServer(
+    **({"num_idle_processes": int(_idle_processes)} if _idle_processes else {})
+)
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -66,6 +75,12 @@ def prewarm(proc: JobProcess) -> None:
 
 
 server.setup_fnc = prewarm
+
+
+def _turn_detection_mode():
+    # Passing None disables automatic turn completion in current LiveKit
+    # Agents. The low-memory profile needs explicit VAD-only endpointing.
+    return MultilingualModel() if MultilingualModel is not None else "vad"
 
 
 @server.rtc_session()
@@ -89,6 +104,7 @@ async def my_agent(ctx: JobContext) -> None:
     stt_api_key = os.getenv("STT_API_KEY", "no-key-needed")
 
     tts_base_url = os.getenv("TTS_BASE_URL", "http://127.0.0.1:8880/v1")
+    tts_provider = os.getenv("TTS_PROVIDER", "kokoro").lower()
     tts_voice = os.getenv("TTS_VOICE", "af_nova")
     tts_api_key = os.getenv("TTS_API_KEY", "no-key-needed")
 
@@ -101,8 +117,26 @@ async def my_agent(ctx: JobContext) -> None:
     wake_word_model = os.getenv("WAKE_WORD_MODEL", "/app/models/wakeword/hey_livekit.onnx")
     wake_word_threshold = float(os.getenv("WAKE_WORD_THRESHOLD", "0.5"))
 
+    session_vad = ctx.proc.userdata["vad"]
+
+    if stt_provider == "nemotron-cpp":
+        from .nemotron_stt import NemotronSTT
+
+        stt = NemotronSTT(
+            base_url=stt_base_url,
+            model=stt_model,
+            api_key=stt_api_key,
+            endpointing_ms=int(os.getenv("NEMOTRON_ENDPOINTING_MS", "300")),
+            # NeMo-Speech.cpp requires the client to commit each utterance.
+            # Reuse Silero's weights in a second stream so real microphone
+            # noise does not make endpointing depend on a fragile RMS cutoff.
+            vad_model=session_vad,
+        )
+    else:
+        stt = openai.STT(base_url=stt_base_url, model=stt_model, api_key=stt_api_key)
+
     session = AgentSession(
-        stt=openai.STT(base_url=stt_base_url, model=stt_model, api_key=stt_api_key),
+        stt=stt,
         llm=openai.LLM(base_url=llama_base_url, model=llama_model, api_key=llama_api_key),
         # The model name selects the wire protocol the openai TTS plugin uses:
         # only {"tts-1", "tts-1-hd"} use the raw-audio-bytes stream that the
@@ -111,9 +145,17 @@ async def my_agent(ctx: JobContext) -> None:
         # body as text, pushes zero frames, and raises "no audio frames were
         # pushed". Kokoro ignores the model field, so "tts-1" is purely a
         # protocol selector here.
-        tts=openai.TTS(base_url=tts_base_url, model="tts-1", voice=tts_voice, api_key=tts_api_key),
-        turn_detection=MultilingualModel(),
-        vad=ctx.proc.userdata["vad"],
+        tts=openai.TTS(
+            base_url=tts_base_url,
+            model="tts-1",
+            voice=tts_voice,
+            api_key=tts_api_key,
+            # Raw PCM lets the ONNX server deliver playable chunks without
+            # buffering a complete WAV or MP3 response first.
+            response_format="pcm" if tts_provider == "kokoro-onnx" else "mp3",
+        ),
+        turn_detection=_turn_detection_mode(),
+        vad=session_vad,
         preemptive_generation=True,
     )
 

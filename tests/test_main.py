@@ -27,6 +27,7 @@ from local_voice_ai.__main__ import (
     _hf_hub_dir,
     _llama_cache_dir,
     _llama_repo_cached,
+    _load_env_files,
     _serve,
     _startup_line,
     make_status_provider,
@@ -322,6 +323,42 @@ class TestStatusDetails:
         llama = next(c for c in provider() if c["name"] == "llama")
         assert llama["detail"] == "2 MB"
 
+    def test_detail_does_not_count_hugging_face_symlinks_twice(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        provider, cfg = self._provider(tmp_path, monkeypatch)
+        repo_dir = (
+            tmp_path / "hub"
+            / f"models--{cfg.llama_hf_repo.split(':')[0].replace('/', '--')}"
+        )
+        blob = repo_dir / "blobs" / "model"
+        blob.parent.mkdir(parents=True)
+        blob.write_bytes(b"\0" * 2_000_000)
+        snapshot = repo_dir / "snapshots" / "revision" / "model.gguf"
+        snapshot.parent.mkdir(parents=True)
+        snapshot.symlink_to(blob)
+
+        llama = next(c for c in provider() if c["name"] == "llama")
+        assert llama["detail"] == "2 MB"
+
+    def test_onnx_tts_progress_uses_its_own_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("HF_HOME", str(tmp_path / "huggingface"))
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+        monkeypatch.setenv("TTS_PROVIDER", "kokoro-onnx")
+        cfg = Config.from_env()
+        sup = Supervisor(_build_specs(cfg))
+        model = tmp_path / "kokoro-onnx" / "model.onnx.part"
+        model.parent.mkdir(parents=True)
+        model.write_bytes(b"\0" * 2_000_000)
+
+        kokoro = next(
+            c for c in make_status_provider(sup, cfg)() if c["name"] == "kokoro"
+        )
+
+        assert kokoro["detail"] == "2 MB"
+
     def test_startup_line_format(self) -> None:
         line = _startup_line([
             {"name": "llama", "ready": False, "detail": "1.2 GB"},
@@ -341,7 +378,165 @@ class TestWhisperSpec:
         assert spec.env["WHISPER_MODEL"] == "Systran/faster-whisper-small"
         assert spec.ready_url == "http://127.0.0.1:8000/health"
 
+    def test_whisper_can_run_on_cpu_while_llama_uses_cuda(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("STT_PROVIDER", "whisper")
+        monkeypatch.setenv("DEVICE", "cuda")
+        monkeypatch.setenv("STT_DEVICE", "cpu")
+
+        spec = next(s for s in _build_specs(Config.from_env()) if s.name == "whisper")
+
+        assert spec.env["DEVICE"] == "cpu"
+
     def test_nemotron_is_default(self) -> None:
         cfg = Config.from_env()
         names = [s.name for s in _build_specs(cfg)]
         assert "nemotron" in names and "whisper" not in names
+
+    def test_native_nemotron_uses_quantized_streaming_server(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("STT_PROVIDER", "nemotron-cpp")
+
+        spec = next(s for s in _build_specs(Config.from_env()) if s.name == "nemotron")
+
+        assert "local_voice_ai.services.nemotron_cpp.launcher" in spec.argv
+        assert spec.ready_url == "http://127.0.0.1:8000/ready"
+
+    def test_sequential_startup_loads_stt_before_llama(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("SEQUENTIAL_STARTUP", "1")
+        names = [spec.name for spec in _build_specs(Config.from_env())]
+
+        assert names.index("nemotron") < names.index("llama")
+
+
+class TestTtsSpec:
+    def test_onnx_provider_uses_low_memory_server(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TTS_PROVIDER", "kokoro-onnx")
+
+        spec = next(s for s in _build_specs(Config.from_env()) if s.name == "kokoro")
+
+        assert "local_voice_ai.services.kokoro_onnx.server" in spec.argv
+
+
+class TestAgentSpec:
+    def test_readiness_waits_for_agent_http_server(self) -> None:
+        spec = next(s for s in _build_specs(Config.from_env()) if s.name == "agent")
+
+        assert spec.ready_url == "http://127.0.0.1:8081/"
+
+
+class TestBindHost:
+    """Inference children bind loopback unless explicitly widened."""
+
+    def _hosts(self) -> dict[str, str]:
+        cfg = Config.from_env()
+        specs = _build_specs(cfg)
+        return {
+            s.name: s.argv[s.argv.index("--host") + 1]
+            for s in specs
+            if "--host" in s.argv
+        }
+
+    def test_defaults_to_loopback(self) -> None:
+        hosts = self._hosts()
+        assert hosts["llama"] == "127.0.0.1"
+        assert hosts["nemotron"] == "127.0.0.1"
+        assert hosts["kokoro"] == "127.0.0.1"
+
+    def test_bind_host_widens_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BIND_HOST", "0.0.0.0")
+        assert set(self._hosts().values()) == {"0.0.0.0"}
+
+    def test_per_service_overrides_global(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("BIND_HOST", "0.0.0.0")
+        monkeypatch.setenv("TTS_BIND_HOST", "127.0.0.1")
+        hosts = self._hosts()
+        assert hosts["llama"] == "0.0.0.0"
+        assert hosts["nemotron"] == "0.0.0.0"
+        assert hosts["kokoro"] == "127.0.0.1"  # TTS stays local
+
+    def test_wildcard_bind_probes_over_loopback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 0.0.0.0 is not a connectable address, so readiness must use loopback.
+        monkeypatch.setenv("BIND_HOST", "0.0.0.0")
+        specs = _build_specs(Config.from_env())
+        for spec in specs:
+            if spec.ready_url:
+                assert "0.0.0.0" not in spec.ready_url
+
+    def test_specific_address_is_probed_directly(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLAMA_BIND_HOST", "192.168.1.50")
+        spec = _llama_spec()
+        assert spec.ready_url == "http://192.168.1.50:11434/v1/models"
+
+    def test_llama_readiness_requires_the_expected_model(self) -> None:
+        spec = _llama_spec()
+        assert spec.response_check is not None
+
+        expected = httpx.Response(
+            200,
+            json={"object": "list", "data": [{"id": "gemma-4-e2b"}]},
+        )
+        ollama = httpx.Response(
+            200,
+            json={"object": "list", "data": [{"id": "qwen3:1.7b"}]},
+        )
+
+        assert spec.response_check(expected) is True
+        assert spec.response_check(ollama) is False
+
+    def test_llama_voice_server_skips_vision_and_uses_configured_slots(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLAMA_PARALLEL", "1")
+        argv = _llama_spec().argv
+
+        assert "--no-mmproj" in argv
+        assert argv[argv.index("--parallel") + 1] == "1"
+
+
+class TestEnvFileLoading:
+    """Bare-metal runs never read .env — only Docker did, via compose's
+    env_file. These cover the precedence that makes local overrides work."""
+
+    def test_env_file_is_loaded(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("LLAMA_MODEL=from-env\n")
+        monkeypatch.delenv("LLAMA_MODEL", raising=False)
+        _load_env_files()
+        assert os.environ["LLAMA_MODEL"] == "from-env"
+
+    def test_env_local_beats_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("LLAMA_MODEL=from-env\n")
+        (tmp_path / ".env.local").write_text("LLAMA_MODEL=from-local\n")
+        monkeypatch.delenv("LLAMA_MODEL", raising=False)
+        _load_env_files()
+        assert os.environ["LLAMA_MODEL"] == "from-local"
+
+    def test_real_env_beats_both_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # An explicit `FOO=bar python -m local_voice_ai serve` must still win,
+        # or every one-off override on the command line would be ignored.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".env").write_text("LLAMA_MODEL=from-env\n")
+        (tmp_path / ".env.local").write_text("LLAMA_MODEL=from-local\n")
+        monkeypatch.setenv("LLAMA_MODEL", "from-shell")
+        _load_env_files()
+        assert os.environ["LLAMA_MODEL"] == "from-shell"
+
+    def test_missing_files_are_not_an_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        _load_env_files()  # no .env or .env.local present

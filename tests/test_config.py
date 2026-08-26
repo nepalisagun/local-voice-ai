@@ -38,12 +38,32 @@ class TestIsLoopback:
 
 
 class TestManageDefaults:
+    def test_compact_context_is_the_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("LLAMA_CTX_SIZE", raising=False)
+
+        assert Config.from_env().llama_ctx_size == 4096
+
+    def test_llama_parallelism_from_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LLAMA_PARALLEL", "1")
+        assert Config.from_env().llama_parallel == 1
+
     def test_all_loopback_defaults_to_managed(self) -> None:
         cfg = Config.from_env()
         assert cfg.manage_livekit
         assert cfg.manage_llama
         assert cfg.manage_stt
         assert cfg.manage_tts
+
+    def test_sequential_startup_is_opt_in(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("SEQUENTIAL_STARTUP", raising=False)
+        assert Config.from_env().sequential_startup is False
+
+        monkeypatch.setenv("SEQUENTIAL_STARTUP", "1")
+        assert Config.from_env().sequential_startup is True
 
     def test_external_livekit_disables_management(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("LIVEKIT_URL", "wss://my-project.livekit.cloud")
@@ -159,6 +179,44 @@ class TestSttProviderDefaults:
         assert cfg.stt_model == "custom-model"
 
 
+class TestLowMemoryRuntimeOptions:
+    def test_tts_provider_defaults_to_torch_kokoro(self) -> None:
+        assert Config.from_env().tts_provider == "kokoro"
+
+    def test_empty_idle_process_setting_preserves_livekit_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AGENT_IDLE_PROCESSES", "")
+
+        assert Config.from_env().agent_idle_processes is None
+
+    def test_low_memory_options_reach_children(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TTS_PROVIDER", "kokoro-onnx")
+        monkeypatch.setenv("TURN_DETECTION", "vad")
+        monkeypatch.setenv("AGENT_IDLE_PROCESSES", "1")
+
+        cfg = Config.from_env()
+
+        assert cfg.tts_provider == "kokoro-onnx"
+        assert cfg.turn_detection == "vad"
+        assert cfg.agent_idle_processes == 1
+        assert cfg.agent_env()["TURN_DETECTION"] == "vad"
+        assert cfg.agent_env()["AGENT_IDLE_PROCESSES"] == "1"
+
+    def test_stt_device_can_differ_from_the_llm_device(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DEVICE", "cuda")
+        monkeypatch.setenv("STT_DEVICE", "cpu")
+
+        cfg = Config.from_env()
+
+        assert cfg.device == "cuda"
+        assert cfg.stt_device == "cpu"
+
+
 class TestAgentEnv:
     def test_agent_env_carries_all_provider_urls(self) -> None:
         cfg = Config.from_env()
@@ -167,6 +225,6 @@ class TestAgentEnv:
             "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
             "LLAMA_BASE_URL", "LLAMA_MODEL", "LLAMA_API_KEY",
             "STT_BASE_URL", "STT_MODEL", "STT_API_KEY", "STT_PROVIDER",
-            "TTS_BASE_URL", "TTS_VOICE", "TTS_API_KEY",
+            "TTS_BASE_URL", "TTS_PROVIDER", "TTS_VOICE", "TTS_API_KEY", "TURN_DETECTION",
         ):
             assert required in env, f"agent_env missing {required}"

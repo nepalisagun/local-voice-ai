@@ -27,6 +27,8 @@ dependencies = [
     "numpy",
     "soundfile",
     "python-multipart",
+    # Spoken-number normalisation for STT output (see local_voice_ai/textnorm).
+    "text2num",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +38,7 @@ ml = [
     "torchaudio",
     "nemo-toolkit[asr]",
     "kokoro>=0.9",
+    "kokoro-onnx>=0.5",
     "huggingface_hub",
 ]
 # Whisper fallback (faster-whisper) — only when STT_PROVIDER=whisper.
@@ -55,6 +58,9 @@ local-voice-ai = "local_voice_ai.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["local_voice_ai*"]
+
+[tool.setuptools.package-data]
+local_voice_ai = ["profiles.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

@@ -17,10 +17,12 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
 import uvicorn
+from dotenv import load_dotenv
 
 from .api import build_app
-from .config import Config
+from .config import Config, probe_host
 from .supervisor import ChildSpec, Supervisor, configure_logging
 
 logger = logging.getLogger("main")
@@ -80,11 +82,16 @@ def _llama_repo_cached(repo: str, env: dict[str, str]) -> bool:
 def _dir_size(path: Path) -> int:
     """Total bytes under ``path`` (0 if missing). Cheap: /models holds few files."""
     total = 0
+    seen_files: set[tuple[int, int]] = set()
     if path.is_dir():
         for p in path.rglob("*"):
             try:
                 if p.is_file():
-                    total += p.stat().st_size
+                    stat = p.stat()
+                    identity = (stat.st_dev, stat.st_ino)
+                    if identity not in seen_files:
+                        seen_files.add(identity)
+                        total += stat.st_size
             except OSError:
                 continue
     return total
@@ -93,6 +100,19 @@ def _dir_size(path: Path) -> int:
 def _hub_repo_dir(repo: str) -> str:
     """HF hub cache dir name for a repo id (tag/quant suffix stripped)."""
     return "models--" + repo.split(":", 1)[0].replace("/", "--")
+
+
+def _model_list_includes(response: httpx.Response, expected_model: str) -> bool:
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        return False
+    return any(
+        isinstance(model, dict) and model.get("id") == expected_model
+        for model in payload["data"]
+    )
 
 
 def make_status_provider(supervisor: Supervisor, cfg: Config):
@@ -104,20 +124,29 @@ def make_status_provider(supervisor: Supervisor, cfg: Config):
     byte count rather than a fake percentage.
     """
     hub = _hf_hub_dir(dict(os.environ))
-    repo_for_child = {
-        "llama": _hub_repo_dir(cfg.llama_hf_repo),
-        "nemotron": _hub_repo_dir(cfg.nemotron_model_name),
-        "whisper": _hub_repo_dir(cfg.whisper_model),
-        "kokoro": _hub_repo_dir("hexgrad/Kokoro-82M"),
+    cache = Path(os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache")))
+    path_for_child = {
+        "llama": hub / _hub_repo_dir(cfg.llama_hf_repo),
+        "nemotron": (
+            cache / "nemo-speech"
+            if cfg.stt_provider == "nemotron-cpp"
+            else hub / _hub_repo_dir(cfg.nemotron_model_name)
+        ),
+        "whisper": hub / _hub_repo_dir(cfg.whisper_model),
+        "kokoro": (
+            cache / "kokoro-onnx"
+            if cfg.tts_provider == "kokoro-onnx"
+            else hub / _hub_repo_dir("hexgrad/Kokoro-82M")
+        ),
     }
 
     def status() -> list[dict[str, object]]:
         children = supervisor.status()
         for child in children:
-            repo = repo_for_child.get(str(child["name"]))
-            if child["ready"] or repo is None:
+            path = path_for_child.get(str(child["name"]))
+            if child["ready"] or path is None:
                 continue
-            size = _dir_size(hub / repo)
+            size = _dir_size(path)
             if size > 1_000_000:  # only meaningful once a download has begun
                 child["detail"] = (
                     f"{size / 1e9:.1f} GB" if size >= 1e9 else f"{size / 1e6:.0f} MB"
@@ -171,9 +200,15 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
     # --- llama.cpp server (C++ binary) -------------------------------
     if cfg.manage_llama:
         llama_bin = os.getenv("LLAMA_BIN", "llama-server")
+        # The image sets HF_HOME/XDG_CACHE_HOME=/models (a mounted volume), so
+        # those win inside the container. A bare-metal run has no writable
+        # /models, and llama-server reports the failed download as a bare
+        # "failed to load model ''" — so fall back to the user's cache. HF_HOME
+        # is derived from XDG_CACHE_HOME so both stay in one tree.
+        xdg_cache = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache"))
         llama_env = {
-            "HF_HOME": os.getenv("HF_HOME", "/models"),
-            "XDG_CACHE_HOME": os.getenv("XDG_CACHE_HOME", "/models"),
+            "HF_HOME": os.getenv("HF_HOME", os.path.join(xdg_cache, "huggingface")),
+            "XDG_CACHE_HOME": xdg_cache,
         }
         # A local .gguf path loads directly (no Hugging Face lookup); otherwise
         # resolve from the HF repo. --offline forces cache-only startup so a
@@ -198,21 +233,28 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                 name="llama",
                 argv=[
                     llama_bin,
-                    "--host", "127.0.0.1",
+                    "--host", cfg.llama_bind_host,
                     "--port", str(cfg.llama_bind_port),
                     *model_argv,
                     *(["--offline"] if offline else []),
                     "--alias", cfg.llama_model_alias,
                     "--ctx-size", str(cfg.llama_ctx_size),
+                    "--parallel", str(cfg.llama_parallel),
                     "--n-gpu-layers", str(cfg.llama_n_gpu_layers),
+                    # The voice UI has no image input. Avoid automatically
+                    # loading the repository's large vision projector.
+                    "--no-mmproj",
                     # Voice agent: thinking models (e.g. gemma-4) must answer
                     # directly — reasoning tokens are seconds of dead air
                     # before TTS gets any text.
                     "--reasoning", "off",
                 ],
                 env=llama_env,
-                ready_url=f"http://127.0.0.1:{cfg.llama_bind_port}/v1/models",
+                ready_url=f"http://{probe_host(cfg.llama_bind_host)}:{cfg.llama_bind_port}/v1/models",
                 ready_timeout=900.0,  # first-run model download can be slow
+                response_check=lambda response, expected=cfg.llama_model_alias: (
+                    _model_list_includes(response, expected)
+                ),
             )
         )
 
@@ -224,14 +266,30 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                     name="whisper",
                     argv=[
                         py, "-m", "local_voice_ai.services.whisper.server",
-                        "--host", "127.0.0.1",
+                        "--host", cfg.stt_bind_host,
                         "--port", str(cfg.stt_bind_port),
                     ],
                     env={
                         "WHISPER_MODEL": cfg.whisper_model,
-                        "DEVICE": cfg.device,
+                        "DEVICE": cfg.stt_device or cfg.device,
                     },
-                    ready_url=f"http://127.0.0.1:{cfg.stt_bind_port}/health",
+                    ready_url=f"http://{probe_host(cfg.stt_bind_host)}:{cfg.stt_bind_port}/health",
+                    ready_timeout=600.0,
+                )
+            )
+        elif cfg.stt_provider == "nemotron-cpp":
+            specs.append(
+                ChildSpec(
+                    name="nemotron",
+                    argv=[
+                        py, "-m", "local_voice_ai.services.nemotron_cpp.launcher",
+                        "--host", cfg.stt_bind_host,
+                        "--port", str(cfg.stt_bind_port),
+                    ],
+                    ready_url=(
+                        f"http://{probe_host(cfg.stt_bind_host)}:"
+                        f"{cfg.stt_bind_port}/ready"
+                    ),
                     ready_timeout=600.0,
                 )
             )
@@ -241,30 +299,37 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                     name="nemotron",
                     argv=[
                         py, "-m", "local_voice_ai.services.nemotron.server",
-                        "--host", "127.0.0.1",
+                        "--host", cfg.stt_bind_host,
                         "--port", str(cfg.stt_bind_port),
                     ],
                     env={
                         "NEMOTRON_MODEL_NAME": cfg.nemotron_model_name,
                         "NEMOTRON_MODEL_ID": cfg.nemotron_model_id,
+                        "NEMOTRON_FP16": "1" if cfg.nemotron_fp16 else "0",
+                        "NEMOTRON_ITN": "1" if cfg.nemotron_itn else "0",
                         "PYTORCH_ENABLE_MPS_FALLBACK": "1",
                     },
-                    ready_url=f"http://127.0.0.1:{cfg.stt_bind_port}/health",
+                    ready_url=f"http://{probe_host(cfg.stt_bind_host)}:{cfg.stt_bind_port}/health",
                     ready_timeout=600.0,
                 )
             )
 
     # --- TTS (Kokoro) ------------------------------------------------
     if cfg.manage_tts:
+        tts_module = (
+            "local_voice_ai.services.kokoro_onnx.server"
+            if cfg.tts_provider == "kokoro-onnx"
+            else "local_voice_ai.services.kokoro.server"
+        )
         specs.append(
             ChildSpec(
                 name="kokoro",
                 argv=[
-                    py, "-m", "local_voice_ai.services.kokoro.server",
-                    "--host", "127.0.0.1",
+                    py, "-m", tts_module,
+                    "--host", cfg.tts_bind_host,
                     "--port", str(cfg.tts_bind_port),
                 ],
-                ready_url=f"http://127.0.0.1:{cfg.tts_bind_port}/v1/models",
+                ready_url=f"http://{probe_host(cfg.tts_bind_host)}:{cfg.tts_bind_port}/v1/models",
                 ready_timeout=600.0,
             )
         )
@@ -275,17 +340,32 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
             name="agent",
             argv=[py, "-m", "local_voice_ai.agent", "start"],
             env=cfg.agent_env(),
-            ready_url=None,
-            ready_timeout=30.0,
+            # AgentServer exposes OK only after plugin and worker startup.
+            ready_url="http://127.0.0.1:8081/",
+            ready_timeout=180.0,
         )
     )
+
+    if cfg.sequential_startup:
+        # NeMo temporarily needs substantially more memory while restoring its
+        # archive, then releases it. Load STT before the resident LLM on small
+        # unified-memory systems so that restore peak has enough headroom.
+        startup_order = {
+            "livekit": 0,
+            "nemotron": 1,
+            "whisper": 1,
+            "llama": 2,
+            "kokoro": 3,
+            "agent": 4,
+        }
+        specs.sort(key=lambda spec: startup_order.get(spec.name, 5))
 
     return specs
 
 
 async def _serve(cfg: Config) -> int:
     specs = _build_specs(cfg)
-    supervisor = Supervisor(specs)
+    supervisor = Supervisor(specs, sequential_startup=cfg.sequential_startup)
 
     logger.info(
         "supervisor managing %d children (livekit=%s llama=%s stt=%s tts=%s)",
@@ -393,7 +473,32 @@ def _download_models(cfg: Config) -> int:
         import nemo.collections.asr as nemo_asr  # type: ignore[import]
         nemo_asr.models.ASRModel.from_pretrained(cfg.nemotron_model_name)
 
+    if cfg.manage_stt and cfg.stt_provider == "nemotron-cpp":
+        logger.info("downloading native quantized nemotron model")
+        from .services.nemotron_cpp.launcher import ensure_model
+
+        ensure_model()
+
     return 0
+
+
+def _load_env_files() -> None:
+    """Load ``.env.local`` then ``.env`` into the environment.
+
+    Under Docker, compose injects these via ``env_file:`` and this is a no-op.
+    On a bare-metal run nothing read them at all, so the documented settings
+    silently did nothing unless you exported them by hand.
+
+    Precedence is real env > ``.env.local`` > ``.env``: ``override=False`` means
+    the first value wins, so an explicit ``FOO=bar python -m ...`` still beats
+    both files, and ``.env.local`` (untracked, per-machine) beats the committed
+    defaults. Values reach the children through the inherited environment, so
+    llama.cpp's own ``LLAMA_ARG_*`` vars work here too.
+    """
+    for name in (".env.local", ".env"):
+        path = Path(name)
+        if path.is_file():
+            load_dotenv(path, override=False)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -404,6 +509,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("console", help="run the agent in interactive console mode")
 
     args = parser.parse_args(argv)
+    _load_env_files()
     cfg = Config.from_env()
     configure_logging(cfg.log_level)
 
