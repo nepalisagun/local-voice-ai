@@ -3,13 +3,13 @@
   <h1>Local Voice Agent</h1>
   <p>This project's goal is to enable anyone to easily build a powerful, private, local voice AI agent.</p>
   <p>A real-time voice AI assistant — STT, LLM, TTS — running in <strong>one container</strong>, supervised by a single Python parent process. Powered by <a href="https://docs.livekit.io/agents?utm_source=local-voice-ai">LiveKit Agents</a>.</p>
-  <p><strong>V2 adds hardware-aware profiles, a Jetson-native streaming stack, and a localhost client for remote voice servers.</strong></p>
+  <p><strong>Local Voice Agent includes hardware-aware profiles, a Jetson-native streaming stack, and a localhost client for remote voice servers.</strong></p>
   <p>To keep up with what I'm building or request new features <a href="https://x.com/intent/follow?screen_name=ShayneParlo">send me a DM on X</a></p>
 </div>
 
-## V2 at a glance
+## At a glance
 
-V2 keeps the single-supervisor design and adds a hardware-aware startup layer.
+Local Voice Agent uses a single supervisor with a hardware-aware startup layer.
 The launcher detects the platform, memory topology, accelerator, and supported
 runtime before it selects models.
 
@@ -84,7 +84,7 @@ python3 run.py logs
 python3 run.py down
 ```
 
-The initial catalog has four conservative variants of the v2 stack:
+The profile catalog has four conservative model stacks:
 
 | Profile           | Planning target | Configuration                                                                     |
 | ----------------- | --------------: | --------------------------------------------------------------------------------- |
@@ -253,10 +253,10 @@ Wait until the launcher reports that all five services are ready.
 
 ##### 4. Start the laptop client
 
-Install Node.js 20 on the laptop. Then use a V2 checkout of this repository:
+Install Node.js 20 on the laptop. Then use a source checkout of this repository:
 
 ```bash
-git clone --branch v2 https://github.com/ShayneP/local-voice-ai.git
+git clone https://github.com/ShayneP/local-voice-ai.git
 cd local-voice-ai
 corepack enable
 python3 run.py client --server 192.168.1.40
@@ -302,20 +302,10 @@ the Python 3.12 container.
 
 ### Direct container run
 
-The V2 branch does not publish a container image on each branch push. The
-`latest` image follows `main`, so build V2 from its source checkout:
+Build the current source checkout with Docker Compose:
 
 ```bash
 docker compose up --build
-```
-
-After V2 reaches `main`, the multi-architecture CPU image will use this command:
-
-```bash
-docker run --rm -it \
-  -p 8080:8080 -p 7880:7880 -p 7881:7881 -p 7882:7882/udp \
-  -v local-voice-ai-models:/models \
-  ghcr.io/shaynep/local-voice-ai:latest
 ```
 
 Open <http://localhost:8080>. The first boot downloads the Nemotron + LLM weights — the page shows per-service progress with download sizes, and the terminal logs a compact status heartbeat plus an unmissable “ready” banner when everything is up. Weights are cached in the `models` volume, so later boots are fast and work offline.
@@ -420,8 +410,8 @@ LiveKit uses this port for the preferred WebRTC media path.
 
 ### Jetson reports a Docker `iptables` raw-table error
 
-Use `python3 run.py` from V2. The Jetson overlay uses host networking and avoids
-the unavailable `iptable_raw` kernel module.
+Use `python3 run.py`. The launcher selects the Jetson overlay, which avoids the
+unavailable `iptable_raw` kernel module.
 
 ### Ollama already uses port 11434
 
