@@ -9,6 +9,10 @@
 
 ## At a glance
 
+
+> [!TIP]
+> Now gives realtime performance on a Jetson Nano!
+
 Local Voice Agent uses a single supervisor with a hardware-aware startup layer.
 The launcher detects the platform, memory topology, accelerator, and supported
 runtime before it selects models.
