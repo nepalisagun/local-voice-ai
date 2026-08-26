@@ -15,7 +15,7 @@ the available hardware and memory.
 The application includes:
 
 - A browser voice interface.
-- Local speech recognition with Nemotron or Whisper.
+- Local streaming speech recognition with Nemotron Q8.
 - Local language models through llama.cpp.
 - Local speech generation with Kokoro.
 - Automatic setup for CPU, NVIDIA, Apple Silicon, and Jetson.
@@ -49,7 +49,7 @@ uv sync --extra ml --extra dev
 ```
 
 The first start needs an internet connection. Later starts reuse downloaded
-model files. Docker also reuses its image layers.
+model files and native components. Docker also reuses its image layers.
 
 ## Quick start
 
@@ -78,13 +78,36 @@ memory budget to select a model profile.
 
 | Profile           | Memory target | Language model | Context | Speech recognition | Voice       |
 | ----------------- | ------------: | -------------- | ------: | ------------------ | ----------- |
-| `lean`            |  About 4.7 GB | Qwen3 1.7B     |      4K | Whisper Small      | Kokoro ONNX |
-| `jetson-realtime` |  About 4.7 GB | Qwen3 1.7B     |      4K | Streaming Nemotron | Kokoro ONNX |
-| `compact`         |  About 5.5 GB | Gemma 4 E2B    |      4K | Nemotron           | Kokoro      |
-| `balanced`        |  About 6.5 GB | Gemma 4 E2B    |     16K | Nemotron           | Kokoro      |
+| `lean`            |  About 4.7 GB | Qwen3 1.7B     |      4K | Nemotron Q8        | Kokoro ONNX |
+| `jetson-realtime` |  About 4.7 GB | Qwen3 1.7B     |      4K | Nemotron Q8        | Kokoro ONNX |
+| `compact`         |  About 5.5 GB | Gemma 4 E2B    |      4K | Nemotron Q8        | Kokoro      |
+| `balanced`        |  About 6.5 GB | Gemma 4 E2B    |     16K | Nemotron Q8        | Kokoro      |
 
 The memory values are planning targets, not hard limits. The automatic mode
 keeps memory available for the operating system and active conversations.
+
+All profiles use the native streaming Nemotron Q8 runtime. The launcher selects
+the CPU, CUDA, or Metal runtime for the device.
+
+The default language is English. For English, the application uses the
+English-specific Nemotron model. For another supported language, it uses
+Nemotron 3.5.
+
+Set the language in `.env.local`:
+
+```env
+STT_LANGUAGE=fr-FR
+```
+
+If the speaker language can change, use `STT_LANGUAGE=auto`. This value selects
+the multilingual model. Whisper remains available as a manual fallback:
+
+```env
+STT_PROVIDER=whisper
+```
+
+Whisper waits for a complete utterance before transcription. Nemotron sends
+partial transcripts while the user speaks, so Nemotron has lower voice latency.
 
 To set a memory budget, use `--memory-gb`:
 
@@ -191,7 +214,8 @@ Common values include:
 | `LIVEKIT_NODE_IP` | LAN address advertised by a managed LiveKit server |
 | `LLAMA_MODEL`     | Model name used by the agent                       |
 | `LLAMA_HF_REPO`   | GGUF model repository and quantization             |
-| `STT_PROVIDER`    | `nemotron`, `nemotron-cpp`, or `whisper`           |
+| `STT_PROVIDER`    | Speech engine. The default is `nemotron-cpp`       |
+| `STT_LANGUAGE`    | Speech language. The default is `en`               |
 | `TTS_VOICE`       | Kokoro voice name                                  |
 | `WAKE_WORD=1`     | Require “Hey LiveKit” before the agent listens     |
 | `WEB_PORT`        | Browser interface port. The default is `8080`      |
@@ -292,6 +316,8 @@ networks. It does not provide authentication for local model endpoints.
 - [LiveKit](https://livekit.io/)
 - [LiveKit Agents](https://docs.livekit.io/agents/)
 - [NVIDIA Nemotron Speech](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b)
+- [NVIDIA Nemotron 3.5 ASR](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b)
+- [NVIDIA NeMo-Speech.cpp](https://github.com/NVIDIA/NeMo-Speech.cpp)
 - [llama.cpp](https://github.com/ggml-org/llama.cpp)
 - [Gemma 4](https://huggingface.co/unsloth/gemma-4-E2B-it-qat-GGUF)
 - [Kokoro](https://github.com/hexgrad/kokoro)

@@ -40,9 +40,7 @@ class TestHardwareDetection:
             system="Linux",
             machine="aarch64",
             total_memory_bytes=8 * GiB,
-            command_output=_commands(
-                {"dpkg-query -W nvidia-jetpack": "nvidia-jetpack\t6.2.1+b38"}
-            ),
+            command_output=_commands({"dpkg-query -W nvidia-jetpack": "nvidia-jetpack\t6.2.1+b38"}),
             read_text=_files(
                 {
                     "/proc/device-tree/model": "NVIDIA Jetson Orin Nano Engineering Reference Developer Kit\x00",
@@ -139,12 +137,8 @@ class TestProfileResolution:
         assert resolved.environment["LLAMA_PARALLEL"] == "1"
         assert resolved.environment["LLAMA_MODEL"] == "qwen3-1.7b"
         assert resolved.model.stt == "Nemotron Speech 0.6B Q8 (native streaming)"
-        assert resolved.environment["LLAMA_HF_REPO"] == (
-            "unsloth/Qwen3-1.7B-GGUF:UD-Q4_K_XL"
-        )
-        assert resolved.environment["JETSON_LLAMA_BASE_URL"] == (
-            "http://127.0.0.1:11435/v1"
-        )
+        assert resolved.environment["LLAMA_HF_REPO"] == ("unsloth/Qwen3-1.7B-GGUF:UD-Q4_K_XL")
+        assert resolved.environment["JETSON_LLAMA_BASE_URL"] == ("http://127.0.0.1:11435/v1")
         assert resolved.environment["JETSON_LLAMA_BIND_PORT"] == "11435"
         assert resolved.environment["SEQUENTIAL_STARTUP"] == "1"
         assert resolved.environment["TTS_PROVIDER"] == "kokoro-onnx"
@@ -204,7 +198,17 @@ class TestProfileResolution:
             total_memory_gib=64.0,
         )
 
-        assert resolve_profile(catalog, hardware).model.key == "compact"
+        resolved = resolve_profile(catalog, hardware)
+
+        assert resolved.model.key == "compact"
+        assert resolved.environment["STT_PROVIDER"] == "nemotron-cpp"
+
+    def test_all_general_profiles_use_native_streaming_nemotron(self, catalog) -> None:
+        for profile_name in ("lean", "compact", "balanced"):
+            profile = catalog.models[profile_name]
+
+            assert profile.environment["STT_PROVIDER"] == "nemotron-cpp"
+            assert "Q8" in profile.stt
 
     def test_explicit_profile_wins_and_warns_when_over_budget(self, catalog) -> None:
         hardware = HardwareInfo(

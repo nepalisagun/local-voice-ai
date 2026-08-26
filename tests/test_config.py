@@ -13,22 +13,28 @@ from local_voice_ai.config import Config, _is_loopback
 
 
 class TestIsLoopback:
-    @pytest.mark.parametrize("url", [
-        "http://127.0.0.1:7880",
-        "http://localhost:8000",
-        "ws://0.0.0.0:1234",
-        "http://[::1]:5000",
-        "ws://127.0.0.1",
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1:7880",
+            "http://localhost:8000",
+            "ws://0.0.0.0:1234",
+            "http://[::1]:5000",
+            "ws://127.0.0.1",
+        ],
+    )
     def test_loopback_urls(self, url: str) -> None:
         assert _is_loopback(url) is True
 
-    @pytest.mark.parametrize("url", [
-        "https://api.openai.com/v1",
-        "wss://my-project.livekit.cloud",
-        "http://192.168.1.5:8000",
-        "http://nemotron:8000/v1",  # docker service name → not loopback
-    ])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://api.openai.com/v1",
+            "wss://my-project.livekit.cloud",
+            "http://192.168.1.5:8000",
+            "http://nemotron:8000/v1",  # docker service name → not loopback
+        ],
+    )
     def test_external_urls(self, url: str) -> None:
         assert _is_loopback(url) is False
 
@@ -43,9 +49,7 @@ class TestManageDefaults:
 
         assert Config.from_env().llama_ctx_size == 4096
 
-    def test_llama_parallelism_from_env(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_llama_parallelism_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("LLAMA_PARALLEL", "1")
         assert Config.from_env().llama_parallel == 1
 
@@ -56,9 +60,7 @@ class TestManageDefaults:
         assert cfg.manage_stt
         assert cfg.manage_tts
 
-    def test_sequential_startup_is_opt_in(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_sequential_startup_is_opt_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("SEQUENTIAL_STARTUP", raising=False)
         assert Config.from_env().sequential_startup is False
 
@@ -102,10 +104,19 @@ class TestManageOverride:
         cfg = Config.from_env()
         assert cfg.manage_llama is True
 
-    @pytest.mark.parametrize("raw,expected", [
-        ("1", True), ("true", True), ("YES", True), ("on", True),
-        ("0", False), ("false", False), ("no", False), ("", False),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("1", True),
+            ("true", True),
+            ("YES", True),
+            ("on", True),
+            ("0", False),
+            ("false", False),
+            ("no", False),
+            ("", False),
+        ],
+    )
     def test_boolean_parsing(
         self, raw: str, expected: bool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -122,10 +133,17 @@ class TestLlamaOffline:
         monkeypatch.delenv("LLAMA_OFFLINE", raising=False)
         assert Config.from_env().llama_offline is None
 
-    @pytest.mark.parametrize("raw,expected", [
-        ("1", True), ("true", True), ("YES", True),
-        ("0", False), ("false", False), ("no", False),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("1", True),
+            ("true", True),
+            ("YES", True),
+            ("0", False),
+            ("false", False),
+            ("no", False),
+        ],
+    )
     def test_explicit_value(
         self, raw: str, expected: bool, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -164,8 +182,9 @@ class TestWakeWord:
 class TestSttProviderDefaults:
     def test_nemotron_default_model(self) -> None:
         cfg = Config.from_env()
-        assert cfg.stt_provider == "nemotron"
+        assert cfg.stt_provider == "nemotron-cpp"
         assert cfg.stt_model == "nemotron-speech-streaming"
+        assert cfg.stt_language == "en"
 
     def test_whisper_default_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("STT_PROVIDER", "whisper")
@@ -177,6 +196,14 @@ class TestSttProviderDefaults:
         monkeypatch.setenv("STT_MODEL", "custom-model")
         cfg = Config.from_env()
         assert cfg.stt_model == "custom-model"
+
+    def test_language_reaches_the_streaming_agent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("STT_LANGUAGE", "fr-FR")
+
+        cfg = Config.from_env()
+
+        assert cfg.stt_language == "fr-FR"
+        assert cfg.agent_env()["STT_LANGUAGE"] == "fr-FR"
 
 
 class TestLowMemoryRuntimeOptions:
@@ -190,9 +217,7 @@ class TestLowMemoryRuntimeOptions:
 
         assert Config.from_env().agent_idle_processes is None
 
-    def test_low_memory_options_reach_children(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_low_memory_options_reach_children(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("TTS_PROVIDER", "kokoro-onnx")
         monkeypatch.setenv("TURN_DETECTION", "vad")
         monkeypatch.setenv("AGENT_IDLE_PROCESSES", "1")
@@ -222,9 +247,20 @@ class TestAgentEnv:
         cfg = Config.from_env()
         env = cfg.agent_env()
         for required in (
-            "LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET",
-            "LLAMA_BASE_URL", "LLAMA_MODEL", "LLAMA_API_KEY",
-            "STT_BASE_URL", "STT_MODEL", "STT_API_KEY", "STT_PROVIDER",
-            "TTS_BASE_URL", "TTS_PROVIDER", "TTS_VOICE", "TTS_API_KEY", "TURN_DETECTION",
+            "LIVEKIT_URL",
+            "LIVEKIT_API_KEY",
+            "LIVEKIT_API_SECRET",
+            "LLAMA_BASE_URL",
+            "LLAMA_MODEL",
+            "LLAMA_API_KEY",
+            "STT_BASE_URL",
+            "STT_MODEL",
+            "STT_API_KEY",
+            "STT_PROVIDER",
+            "TTS_BASE_URL",
+            "TTS_PROVIDER",
+            "TTS_VOICE",
+            "TTS_API_KEY",
+            "TURN_DETECTION",
         ):
             assert required in env, f"agent_env missing {required}"

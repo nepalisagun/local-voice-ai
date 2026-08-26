@@ -12,6 +12,7 @@ services:
       args:
         LLAMA_IMAGE: ${LLAMA_IMAGE:-ghcr.io/ggml-org/llama.cpp:server-cuda}
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu124}
+        NEMO_SPEECH_BACKEND: ${NEMO_SPEECH_BACKEND:-cuda}
     environment:
       LLAMA_N_GPU_LAYERS: ${LLAMA_N_GPU_LAYERS:-999}
       DEVICE: ${DEVICE:-cuda}

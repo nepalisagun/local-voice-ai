@@ -42,6 +42,19 @@ RUN mkdir -p /cuda-libs \
     done
 FROM ${LIVEKIT_IMAGE} AS livekit-bin
 
+# The release archive is small, pinned, and checksum-verified. Compose selects
+# the CPU or CUDA build to match the rest of the image.
+FROM python:3.11-slim AS nemo-speech-bin
+ARG TARGETARCH
+ARG NEMO_SPEECH_BACKEND=cpu
+WORKDIR /src
+COPY local_voice_ai ./local_voice_ai
+RUN python -m local_voice_ai.native_runtime \
+        --system Linux \
+        --machine "${TARGETARCH}" \
+        --backend "${NEMO_SPEECH_BACKEND}" \
+        --prefix /opt/nemo-speech
+
 # ---------------- runtime ----------------
 FROM ${PYTHON_BASE} AS runtime
 
@@ -98,6 +111,9 @@ RUN ln -s /usr/local/lib/llama/llama-server /usr/local/bin/llama-server \
     && echo /usr/local/lib/llama > /etc/ld.so.conf.d/llama.conf \
     && ldconfig
 COPY --from=livekit-bin /livekit-server /usr/local/bin/livekit-server
+COPY --from=nemo-speech-bin /opt/nemo-speech /opt/nemo-speech
+ENV PATH=/opt/nemo-speech/bin:${PATH} \
+    LD_LIBRARY_PATH=/opt/nemo-speech/lib:${LD_LIBRARY_PATH}
 
 # Drop in the static-exported frontend
 COPY --from=frontend /app/out /app/frontend/out

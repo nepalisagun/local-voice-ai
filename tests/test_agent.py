@@ -16,3 +16,9 @@ def test_multilingual_mode_constructs_the_turn_detector(monkeypatch) -> None:
     monkeypatch.setattr(agent, "MultilingualModel", lambda: detector)
 
     assert agent._turn_detection_mode() is detector
+
+
+def test_native_nemotron_receives_configured_language(monkeypatch) -> None:
+    monkeypatch.setenv("STT_LANGUAGE", "fr-FR")
+
+    assert agent._stt_language() == "fr-FR"

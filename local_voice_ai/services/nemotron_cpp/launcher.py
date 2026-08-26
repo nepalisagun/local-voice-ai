@@ -8,18 +8,56 @@ import logging
 import os
 import shutil
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 logger = logging.getLogger("nemotron-cpp")
 logging.basicConfig(level=logging.INFO)
 
-MODEL_REVISION = "ebe59e5a817142986528bbbee5dba8db7b38ed50"
-MODEL_FILENAME = "nemotron-speech-streaming-en-0.6b.q8_0.gguf"
-MODEL_URL = (
-    "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b/resolve/"
-    f"{MODEL_REVISION}/{MODEL_FILENAME}"
+
+@dataclass(frozen=True)
+class ModelArtifact:
+    filename: str
+    url: str
+    sha256: str
+
+
+ENGLISH_MODEL = ModelArtifact(
+    filename="nemotron-speech-streaming-en-0.6b.q8_0.gguf",
+    url=(
+        "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b/resolve/"
+        "ebe59e5a817142986528bbbee5dba8db7b38ed50/"
+        "nemotron-speech-streaming-en-0.6b.q8_0.gguf"
+    ),
+    sha256="d9a01898d2a611c8764e23a1c2f45e70bbd5a425dc4de93692ac951dd603812d",
 )
-MODEL_SHA256 = "d9a01898d2a611c8764e23a1c2f45e70bbd5a425dc4de93692ac951dd603812d"
+MULTILINGUAL_MODEL = ModelArtifact(
+    filename="nemotron-3.5-asr-streaming-0.6b.q8_0.gguf",
+    url=(
+        "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b/resolve/"
+        "1c8deaecc64b91f034d73e08dd8b64625eb3395d/"
+        "nemotron-3.5-asr-streaming-0.6b.q8_0.gguf"
+    ),
+    sha256="a5c435f294eea8f88ce68dd27b8c3bfea7f777cb2fbba04fcd30eaa555f429ae",
+)
+
+# Backward-compatible names for callers that customize the download URL.
+MODEL_FILENAME = ENGLISH_MODEL.filename
+MODEL_URL = ENGLISH_MODEL.url
+MODEL_SHA256 = ENGLISH_MODEL.sha256
+
+
+def artifact_for_language(language: str, selection: str = "auto") -> ModelArtifact:
+    """Select the English-specialized or multilingual streaming Q8 model."""
+    selected = selection.strip().lower()
+    if selected == "english":
+        return ENGLISH_MODEL
+    if selected == "multilingual":
+        return MULTILINGUAL_MODEL
+    if selected != "auto":
+        raise ValueError("NEMOTRON_CPP_MODEL must be auto, english, or multilingual")
+    language = language.strip().lower()
+    return ENGLISH_MODEL if language == "en" or language.startswith("en-") else MULTILINGUAL_MODEL
 
 
 def cache_dir() -> Path:
@@ -27,8 +65,8 @@ def cache_dir() -> Path:
     return Path(base) / "nemo-speech"
 
 
-def model_path() -> Path:
-    return cache_dir() / MODEL_FILENAME
+def model_path(filename: str = MODEL_FILENAME) -> Path:
+    return cache_dir() / filename
 
 
 def _sha256(path: Path) -> str:
@@ -77,9 +115,11 @@ def server_argv(
     host: str,
     port: int,
     right_context: int,
+    gpu: int,
+    binary: str = "nemo-speech",
 ) -> list[str]:
     return [
-        "nemo-speech",
+        binary,
         "serve",
         "--asr-model",
         str(model),
@@ -89,7 +129,7 @@ def server_argv(
         str(port),
         "--no-ui",
         "--asr.backend.gpu",
-        "0",
+        str(gpu),
         "--asr.streaming.rnnt_right_context",
         str(right_context),
     ]
@@ -108,15 +148,27 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    model = ensure_model(
-        url=os.getenv("NEMOTRON_CPP_MODEL_URL", MODEL_URL),
-        expected_sha256=os.getenv("NEMOTRON_CPP_MODEL_SHA256", MODEL_SHA256),
+    language = os.getenv("STT_LANGUAGE", "en")
+    artifact = artifact_for_language(
+        language,
+        os.getenv("NEMOTRON_CPP_MODEL", "auto"),
     )
+
+    model = ensure_model(
+        url=os.getenv("NEMOTRON_CPP_MODEL_URL", artifact.url),
+        expected_sha256=os.getenv("NEMOTRON_CPP_MODEL_SHA256", artifact.sha256),
+        destination=model_path(artifact.filename),
+    )
+    device = os.getenv("STT_DEVICE") or os.getenv("DEVICE", "cpu")
+    configured_gpu = os.getenv("NEMOTRON_CPP_GPU")
+    gpu = int(configured_gpu) if configured_gpu else (-1 if device == "cpu" else 0)
     command = server_argv(
         model,
         host=args.host,
         port=args.port,
         right_context=args.right_context,
+        gpu=gpu,
+        binary=os.getenv("NEMO_SPEECH_BIN", "nemo-speech"),
     )
     logger.info("starting NeMo-Speech.cpp")
     os.execvp(command[0], command)

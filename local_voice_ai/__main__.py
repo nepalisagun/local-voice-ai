@@ -110,8 +110,7 @@ def _model_list_includes(response: httpx.Response, expected_model: str) -> bool:
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
         return False
     return any(
-        isinstance(model, dict) and model.get("id") == expected_model
-        for model in payload["data"]
+        isinstance(model, dict) and model.get("id") == expected_model for model in payload["data"]
     )
 
 
@@ -148,9 +147,7 @@ def make_status_provider(supervisor: Supervisor, cfg: Config):
                 continue
             size = _dir_size(path)
             if size > 1_000_000:  # only meaningful once a download has begun
-                child["detail"] = (
-                    f"{size / 1e9:.1f} GB" if size >= 1e9 else f"{size / 1e6:.0f} MB"
-                )
+                child["detail"] = f"{size / 1e9:.1f} GB" if size >= 1e9 else f"{size / 1e6:.0f} MB"
         return children
 
     return status
@@ -179,18 +176,23 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                 argv=[
                     livekit_bin,
                     "--dev",
-                    "--bind", "0.0.0.0",
-                    "--port", str(cfg.livekit_bind_port),
+                    "--bind",
+                    "0.0.0.0",
+                    "--port",
+                    str(cfg.livekit_bind_port),
                     # livekit-server's RTC TCP port flag is the dotted config
                     # key --rtc.tcp_port (there is no --rtc-port flag).
-                    "--rtc.tcp_port", str(cfg.livekit_rtc_port),
+                    "--rtc.tcp_port",
+                    str(cfg.livekit_rtc_port),
                     # Pin the WebRTC UDP media port so it matches the published
                     # container port, and advertise a host-reachable ICE address.
                     # Without --node-ip the dev server auto-detects the container
                     # IP (e.g. 172.x.x.x), which a browser on the host cannot
                     # reach, so media never connects and the room never joins.
-                    "--udp-port", str(cfg.livekit_udp_port),
-                    "--node-ip", cfg.livekit_node_ip,
+                    "--udp-port",
+                    str(cfg.livekit_udp_port),
+                    "--node-ip",
+                    cfg.livekit_node_ip,
                 ],
                 ready_url=None,  # LiveKit dev server has no consistent /health
                 ready_timeout=30.0,
@@ -233,21 +235,28 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                 name="llama",
                 argv=[
                     llama_bin,
-                    "--host", cfg.llama_bind_host,
-                    "--port", str(cfg.llama_bind_port),
+                    "--host",
+                    cfg.llama_bind_host,
+                    "--port",
+                    str(cfg.llama_bind_port),
                     *model_argv,
                     *(["--offline"] if offline else []),
-                    "--alias", cfg.llama_model_alias,
-                    "--ctx-size", str(cfg.llama_ctx_size),
-                    "--parallel", str(cfg.llama_parallel),
-                    "--n-gpu-layers", str(cfg.llama_n_gpu_layers),
+                    "--alias",
+                    cfg.llama_model_alias,
+                    "--ctx-size",
+                    str(cfg.llama_ctx_size),
+                    "--parallel",
+                    str(cfg.llama_parallel),
+                    "--n-gpu-layers",
+                    str(cfg.llama_n_gpu_layers),
                     # The voice UI has no image input. Avoid automatically
                     # loading the repository's large vision projector.
                     "--no-mmproj",
                     # Voice agent: thinking models (e.g. gemma-4) must answer
                     # directly — reasoning tokens are seconds of dead air
                     # before TTS gets any text.
-                    "--reasoning", "off",
+                    "--reasoning",
+                    "off",
                 ],
                 env=llama_env,
                 ready_url=f"http://{probe_host(cfg.llama_bind_host)}:{cfg.llama_bind_port}/v1/models",
@@ -265,9 +274,13 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                 ChildSpec(
                     name="whisper",
                     argv=[
-                        py, "-m", "local_voice_ai.services.whisper.server",
-                        "--host", cfg.stt_bind_host,
-                        "--port", str(cfg.stt_bind_port),
+                        py,
+                        "-m",
+                        "local_voice_ai.services.whisper.server",
+                        "--host",
+                        cfg.stt_bind_host,
+                        "--port",
+                        str(cfg.stt_bind_port),
                     ],
                     env={
                         "WHISPER_MODEL": cfg.whisper_model,
@@ -282,14 +295,15 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                 ChildSpec(
                     name="nemotron",
                     argv=[
-                        py, "-m", "local_voice_ai.services.nemotron_cpp.launcher",
-                        "--host", cfg.stt_bind_host,
-                        "--port", str(cfg.stt_bind_port),
+                        py,
+                        "-m",
+                        "local_voice_ai.services.nemotron_cpp.launcher",
+                        "--host",
+                        cfg.stt_bind_host,
+                        "--port",
+                        str(cfg.stt_bind_port),
                     ],
-                    ready_url=(
-                        f"http://{probe_host(cfg.stt_bind_host)}:"
-                        f"{cfg.stt_bind_port}/ready"
-                    ),
+                    ready_url=(f"http://{probe_host(cfg.stt_bind_host)}:{cfg.stt_bind_port}/ready"),
                     ready_timeout=600.0,
                 )
             )
@@ -298,9 +312,13 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
                 ChildSpec(
                     name="nemotron",
                     argv=[
-                        py, "-m", "local_voice_ai.services.nemotron.server",
-                        "--host", cfg.stt_bind_host,
-                        "--port", str(cfg.stt_bind_port),
+                        py,
+                        "-m",
+                        "local_voice_ai.services.nemotron.server",
+                        "--host",
+                        cfg.stt_bind_host,
+                        "--port",
+                        str(cfg.stt_bind_port),
                     ],
                     env={
                         "NEMOTRON_MODEL_NAME": cfg.nemotron_model_name,
@@ -325,9 +343,13 @@ def _build_specs(cfg: Config) -> list[ChildSpec]:
             ChildSpec(
                 name="kokoro",
                 argv=[
-                    py, "-m", tts_module,
-                    "--host", cfg.tts_bind_host,
-                    "--port", str(cfg.tts_bind_port),
+                    py,
+                    "-m",
+                    tts_module,
+                    "--host",
+                    cfg.tts_bind_host,
+                    "--port",
+                    str(cfg.tts_bind_port),
                 ],
                 ready_url=f"http://{probe_host(cfg.tts_bind_host)}:{cfg.tts_bind_port}/v1/models",
                 ready_timeout=600.0,
@@ -370,7 +392,10 @@ async def _serve(cfg: Config) -> int:
     logger.info(
         "supervisor managing %d children (livekit=%s llama=%s stt=%s tts=%s)",
         len(specs),
-        cfg.manage_livekit, cfg.manage_llama, cfg.manage_stt, cfg.manage_tts,
+        cfg.manage_livekit,
+        cfg.manage_llama,
+        cfg.manage_stt,
+        cfg.manage_tts,
     )
 
     status_provider = make_status_provider(supervisor, cfg)
@@ -440,9 +465,7 @@ async def _serve(cfg: Config) -> int:
             "  └────────────────────────────────────────────────┘\n",
             cfg.web_port,
         )
-        done, _ = await asyncio.wait(
-            {web_task, sup_task}, return_when=asyncio.FIRST_COMPLETED
-        )
+        done, _ = await asyncio.wait({web_task, sup_task}, return_when=asyncio.FIRST_COMPLETED)
 
     # Whatever finished first triggers a coordinated shutdown.
     uv_server.should_exit = True
@@ -464,6 +487,7 @@ def _download_models(cfg: Config) -> int:
     logger.info("downloading agent prewarm models (silero VAD, turn detector)")
     # Reuse livekit-agents' built-in download-files command
     import subprocess
+
     rc = subprocess.call([sys.executable, "-m", "local_voice_ai.agent", "download-files"])
     if rc != 0:
         return rc
@@ -471,13 +495,26 @@ def _download_models(cfg: Config) -> int:
     if cfg.manage_stt and cfg.stt_provider == "nemotron":
         logger.info("downloading nemotron model %s", cfg.nemotron_model_name)
         import nemo.collections.asr as nemo_asr  # type: ignore[import]
+
         nemo_asr.models.ASRModel.from_pretrained(cfg.nemotron_model_name)
 
     if cfg.manage_stt and cfg.stt_provider == "nemotron-cpp":
         logger.info("downloading native quantized nemotron model")
-        from .services.nemotron_cpp.launcher import ensure_model
+        from .services.nemotron_cpp.launcher import (
+            artifact_for_language,
+            ensure_model,
+            model_path,
+        )
 
-        ensure_model()
+        artifact = artifact_for_language(
+            cfg.stt_language,
+            os.getenv("NEMOTRON_CPP_MODEL", "auto"),
+        )
+        ensure_model(
+            url=os.getenv("NEMOTRON_CPP_MODEL_URL", artifact.url),
+            expected_sha256=os.getenv("NEMOTRON_CPP_MODEL_SHA256", artifact.sha256),
+            destination=model_path(artifact.filename),
+        )
 
     return 0
 

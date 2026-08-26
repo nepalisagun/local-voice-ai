@@ -116,10 +116,11 @@ class Config:
     llama_bind_host: str = _DEFAULT_BIND_HOST
     manage_llama: bool = True
 
-    # --- STT (Nemotron by default) --------------------------------------
-    stt_provider: str = "nemotron"  # "nemotron" | "whisper"
+    # --- STT (native streaming Nemotron by default) ---------------------
+    stt_provider: str = "nemotron-cpp"  # "nemotron-cpp" | "nemotron" | "whisper"
     stt_base_url: str = "http://127.0.0.1:8000/v1"
     stt_model: str = "nemotron-speech-streaming"
+    stt_language: str = "en"
     stt_api_key: str = "no-key-needed"
     stt_bind_port: int = 8000
     stt_bind_host: str = _DEFAULT_BIND_HOST
@@ -139,7 +140,6 @@ class Config:
     # Optional STT-only override. For example, Jetson runs Whisper on CPU while
     # llama.cpp continues to use CUDA through LLAMA_N_GPU_LAYERS.
     stt_device: str = ""
-
 
     # --- TTS (Kokoro) ---------------------------------------------------
     tts_provider: str = "kokoro"  # "kokoro" | "kokoro-onnx"
@@ -228,6 +228,7 @@ class Config:
             stt_provider=stt_provider,
             stt_base_url=stt_base_url,
             stt_model=os.getenv("STT_MODEL", default_stt_model),
+            stt_language=os.getenv("STT_LANGUAGE", cls.stt_language),
             stt_api_key=os.getenv("STT_API_KEY", cls.stt_api_key),
             stt_bind_port=int(os.getenv("STT_BIND_PORT", str(cls.stt_bind_port))),
             stt_bind_host=os.getenv("STT_BIND_HOST", bind_host),
@@ -254,13 +255,9 @@ class Config:
             manage_tts=_env_bool("MANAGE_TTS", _is_loopback(tts_base_url)),
             #
             device=os.getenv("DEVICE", cls.device).lower(),
-            turn_detection=os.getenv(
-                "TURN_DETECTION", cls.turn_detection
-            ).lower(),
+            turn_detection=os.getenv("TURN_DETECTION", cls.turn_detection).lower(),
             agent_idle_processes=_env_int_opt("AGENT_IDLE_PROCESSES"),
-            sequential_startup=_env_bool(
-                "SEQUENTIAL_STARTUP", cls.sequential_startup
-            ),
+            sequential_startup=_env_bool("SEQUENTIAL_STARTUP", cls.sequential_startup),
             log_level=os.getenv("LOG_LEVEL", cls.log_level).upper(),
         )
 
@@ -276,6 +273,7 @@ class Config:
             "STT_PROVIDER": self.stt_provider,
             "STT_BASE_URL": self.stt_base_url,
             "STT_MODEL": self.stt_model,
+            "STT_LANGUAGE": self.stt_language,
             "STT_API_KEY": self.stt_api_key,
             "WAKE_WORD": "1" if self.wake_word else "0",
             "WAKE_WORD_MODEL": self.wake_word_model,

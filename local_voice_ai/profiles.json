@@ -3,12 +3,12 @@
     "lean": {
       "rank": 5,
       "label": "Lean (under 5 GB)",
-      "description": "A smaller language model and CPU speech recognizer that preserve headroom on unified-memory devices.",
+      "description": "A smaller language model and native streaming speech recognizer that preserve headroom on unified-memory devices.",
       "minimum_budget_gib": 4.0,
       "target_memory_gib": 4.7,
-      "download_gib": 1.9,
+      "download_gib": 2.2,
       "llm": "Qwen3 1.7B Q4",
-      "stt": "Whisper Small (CPU)",
+      "stt": "Nemotron Speech 0.6B Q8 (native streaming)",
       "tts": "Kokoro 82M ONNX FP16",
       "environment": {
         "LLAMA_MODEL": "qwen3-1.7b",
@@ -16,10 +16,8 @@
         "LLAMA_HF_REPO": "unsloth/Qwen3-1.7B-GGUF:UD-Q4_K_XL",
         "LLAMA_CTX_SIZE": "4096",
         "LLAMA_PARALLEL": "1",
-        "STT_PROVIDER": "whisper",
-        "STT_MODEL": "Systran/faster-whisper-small",
-        "WHISPER_MODEL": "Systran/faster-whisper-small",
-        "STT_DEVICE": "cpu",
+        "STT_PROVIDER": "nemotron-cpp",
+        "STT_MODEL": "nemotron-speech-streaming",
         "TTS_PROVIDER": "kokoro-onnx",
         "TURN_DETECTION": "vad",
         "AGENT_IDLE_PROCESSES": "1"
@@ -31,7 +29,7 @@
       "description": "A Jetson-native streaming speech stack with quantized weights and conservative unified-memory headroom.",
       "minimum_budget_gib": 4.0,
       "target_memory_gib": 4.7,
-      "download_gib": 2.0,
+      "download_gib": 2.2,
       "llm": "Qwen3 1.7B Q4",
       "stt": "Nemotron Speech 0.6B Q8 (native streaming)",
       "tts": "Kokoro 82M ONNX FP16",
@@ -55,9 +53,9 @@
       "description": "The default voice stack with a smaller context window and conservative headroom.",
       "minimum_budget_gib": 5.0,
       "target_memory_gib": 5.5,
-      "download_gib": 4.2,
+      "download_gib": 3.8,
       "llm": "Gemma 4 E2B QAT Q4",
-      "stt": "Nemotron Speech 0.6B FP16",
+      "stt": "Nemotron Speech 0.6B Q8 (native streaming)",
       "tts": "Kokoro 82M",
       "environment": {
         "LLAMA_MODEL": "gemma-4-e2b",
@@ -65,10 +63,8 @@
         "LLAMA_HF_REPO": "unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL",
         "LLAMA_CTX_SIZE": "4096",
         "LLAMA_PARALLEL": "1",
-        "STT_PROVIDER": "nemotron",
-        "STT_MODEL": "nemotron-speech-streaming",
-        "NEMOTRON_MODEL_NAME": "nvidia/nemotron-speech-streaming-en-0.6b",
-        "NEMOTRON_FP16": "1"
+        "STT_PROVIDER": "nemotron-cpp",
+        "STT_MODEL": "nemotron-speech-streaming"
       }
     },
     "balanced": {
@@ -77,9 +73,9 @@
       "description": "The same proven models with a 16K context window for longer conversations.",
       "minimum_budget_gib": 6.5,
       "target_memory_gib": 6.5,
-      "download_gib": 4.2,
+      "download_gib": 3.8,
       "llm": "Gemma 4 E2B QAT Q4",
-      "stt": "Nemotron Speech 0.6B FP16",
+      "stt": "Nemotron Speech 0.6B Q8 (native streaming)",
       "tts": "Kokoro 82M",
       "environment": {
         "LLAMA_MODEL": "gemma-4-e2b",
@@ -87,10 +83,8 @@
         "LLAMA_HF_REPO": "unsloth/gemma-4-E2B-it-qat-GGUF:UD-Q4_K_XL",
         "LLAMA_CTX_SIZE": "16384",
         "LLAMA_PARALLEL": "1",
-        "STT_PROVIDER": "nemotron",
-        "STT_MODEL": "nemotron-speech-streaming",
-        "NEMOTRON_MODEL_NAME": "nvidia/nemotron-speech-streaming-en-0.6b",
-        "NEMOTRON_FP16": "1"
+        "STT_PROVIDER": "nemotron-cpp",
+        "STT_MODEL": "nemotron-speech-streaming"
       }
     }
   },

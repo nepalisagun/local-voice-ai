@@ -65,9 +65,7 @@ class Assistant(Agent):
 
 
 _idle_processes = os.getenv("AGENT_IDLE_PROCESSES")
-server = AgentServer(
-    **({"num_idle_processes": int(_idle_processes)} if _idle_processes else {})
-)
+server = AgentServer(**({"num_idle_processes": int(_idle_processes)} if _idle_processes else {}))
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -83,6 +81,10 @@ def _turn_detection_mode():
     return MultilingualModel() if MultilingualModel is not None else "vad"
 
 
+def _stt_language() -> str:
+    return os.getenv("STT_LANGUAGE", "en")
+
+
 @server.rtc_session()
 async def my_agent(ctx: JobContext) -> None:
     ctx.log_context_fields = {"room": ctx.room.name}
@@ -91,7 +93,7 @@ async def my_agent(ctx: JobContext) -> None:
     llama_base_url = os.getenv("LLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
     llama_api_key = os.getenv("LLAMA_API_KEY", "no-key-needed")
 
-    stt_provider = os.getenv("STT_PROVIDER", "nemotron").lower()
+    stt_provider = os.getenv("STT_PROVIDER", "nemotron-cpp").lower()
     if stt_provider == "whisper":
         default_stt_base_url = "http://127.0.0.1:8000/v1"
         default_stt_model = "Systran/faster-whisper-small"
@@ -110,7 +112,11 @@ async def my_agent(ctx: JobContext) -> None:
 
     logger.info(
         "agent session: stt=%s/%s llm=%s/%s tts=%s",
-        stt_provider, stt_model, llama_base_url, llama_model, tts_base_url,
+        stt_provider,
+        stt_model,
+        llama_base_url,
+        llama_model,
+        tts_base_url,
     )
 
     wake_word = os.getenv("WAKE_WORD", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -126,6 +132,7 @@ async def my_agent(ctx: JobContext) -> None:
             base_url=stt_base_url,
             model=stt_model,
             api_key=stt_api_key,
+            language=_stt_language(),
             endpointing_ms=int(os.getenv("NEMOTRON_ENDPOINTING_MS", "300")),
             # NeMo-Speech.cpp requires the client to commit each utterance.
             # Reuse Silero's weights in a second stream so real microphone
@@ -184,8 +191,7 @@ async def my_agent(ctx: JobContext) -> None:
         # Speak first so the user knows the audio path works.
         session.generate_reply(
             instructions=(
-                "Greet the user warmly in one short sentence and invite them "
-                "to ask you anything."
+                "Greet the user warmly in one short sentence and invite them to ask you anything."
             )
         )
 

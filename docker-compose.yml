@@ -9,6 +9,7 @@ services:
         LIVEKIT_IMAGE: ${LIVEKIT_IMAGE:-livekit/livekit-server:latest}
         PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim}
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}
+        NEMO_SPEECH_BACKEND: ${NEMO_SPEECH_BACKEND:-cpu}
     env_file:
       - path: .env
       # Per-machine settings must reach the container too. The launcher uses
@@ -21,9 +22,13 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-secret}
       CLIENT_ORIGINS: ${CLIENT_ORIGINS:-}
-      STT_PROVIDER: ${STT_PROVIDER:-nemotron}
+      STT_PROVIDER: ${STT_PROVIDER:-nemotron-cpp}
+      STT_LANGUAGE: ${STT_LANGUAGE:-en}
       STT_DEVICE: ${STT_DEVICE:-}
       STT_MODEL: ${STT_MODEL:-nemotron-speech-streaming}
+      NEMOTRON_CPP_MODEL: ${NEMOTRON_CPP_MODEL:-auto}
+      NEMOTRON_CPP_GPU: ${NEMOTRON_CPP_GPU:-}
+      NEMO_SPEECH_BIN: ${NEMO_SPEECH_BIN:-nemo-speech}
       NEMOTRON_MODEL_NAME: ${NEMOTRON_MODEL_NAME:-nvidia/nemotron-speech-streaming-en-0.6b}
       NEMOTRON_MODEL_ID: ${NEMOTRON_MODEL_ID:-nemotron-speech-streaming}
       NEMOTRON_FP16: ${NEMOTRON_FP16:-1}

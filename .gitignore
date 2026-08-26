@@ -6,6 +6,7 @@ inference/llama/models/
 .env.local
 .local-voice-ai.toml
 .local-voice-ai.toml.tmp
+.local-voice-ai/
 
 # Python cache artifacts
 **/__pycache__/

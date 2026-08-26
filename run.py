@@ -32,6 +32,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from local_voice_ai.launcher import choose_profile, render_plan
+from local_voice_ai.native_runtime import install_runtime
 from local_voice_ai.profiles import (
     DEFAULT_CATALOG_PATH,
     HardwareInfo,
@@ -49,6 +50,7 @@ ROOT = Path(__file__).resolve().parent
 FRONTEND = ROOT / "frontend"
 SELECTION_PATH = ROOT / ".local-voice-ai.toml"
 LOCAL_ENV_PATH = ROOT / ".env.local"
+NATIVE_RUNTIME_DIR = ROOT / ".local-voice-ai" / "runtime"
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -260,15 +262,17 @@ def _native_python() -> Path:
     )
 
 
-def _native_dependency_error(python: Path) -> str | None:
+def _native_dependency_error(python: Path, stt_provider: str = "nemotron-cpp") -> str | None:
+    imports = "import uvicorn, dotenv, torch, kokoro; import livekit.agents"
+    if stt_provider == "nemotron":
+        imports += "; import nemo.collections.asr"
+    elif stt_provider == "whisper":
+        imports += "; import faster_whisper"
     probe = _run(
         [
             str(python),
             "-c",
-            (
-                "import uvicorn, dotenv, torch, kokoro; "
-                "import livekit.agents; import nemo.collections.asr"
-            ),
+            imports,
         ],
         capture=True,
         timeout=60,
@@ -300,6 +304,44 @@ def _native_python_version_error(python: Path) -> str | None:
             f"the application runtime requires Python 3.11-3.13; "
             f"{python} is Python {version} (it can run the setup launcher only)"
         )
+    return None
+
+
+def prepare_native_stt(
+    profile: ResolvedProfile,
+    environment: dict[str, str],
+) -> str | None:
+    """Install the pinned native STT runtime when a native profile needs it."""
+    if (
+        profile.platform.runtime != "native"
+        or environment.get("STT_PROVIDER", "nemotron-cpp") != "nemotron-cpp"
+    ):
+        return None
+
+    configured = environment.get("NEMO_SPEECH_BIN")
+    search_path = environment.get("PATH")
+    if configured:
+        existing = shutil.which(configured, path=search_path)
+        if existing is None:
+            return f"configured NEMO_SPEECH_BIN was not found: {configured}"
+        environment["NEMO_SPEECH_BIN"] = existing
+        return None
+
+    print("Installing the native streaming speech runtime…")
+    try:
+        binary = install_runtime(
+            NATIVE_RUNTIME_DIR,
+            system=profile.hardware.system,
+            machine=profile.hardware.machine,
+            backend=profile.hardware.accelerator,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        return f"could not install the native streaming speech runtime: {exc}"
+
+    environment["NEMO_SPEECH_BIN"] = str(binary)
+    environment["PATH"] = os.pathsep.join(
+        part for part in (str(binary.parent), search_path or "") if part
+    )
     return None
 
 
@@ -416,7 +458,10 @@ def preflight(profile: ResolvedProfile, environment: Mapping[str, str]) -> list[
     if version_error:
         errors.append(version_error)
     else:
-        dependency_error = _native_dependency_error(python)
+        dependency_error = _native_dependency_error(
+            python,
+            environment.get("STT_PROVIDER", "nemotron-cpp"),
+        )
         if dependency_error:
             if profile.hardware.platform_key.startswith("jetson"):
                 errors.append(
@@ -428,7 +473,10 @@ def preflight(profile: ResolvedProfile, environment: Mapping[str, str]) -> list[
                 errors.append(dependency_error + "; run `uv sync --extra ml --extra dev` first")
 
     search_path = environment.get("PATH")
-    for binary in ("livekit-server", "llama-server"):
+    binaries = ["livekit-server", "llama-server"]
+    if environment.get("STT_PROVIDER", "nemotron-cpp") == "nemotron-cpp":
+        binaries.append(environment.get("NEMO_SPEECH_BIN", "nemo-speech"))
+    for binary in binaries:
         if shutil.which(binary, path=search_path) is None:
             errors.append(f"{binary} was not found on PATH")
 
@@ -520,6 +568,11 @@ def _start(profile: ResolvedProfile, *, build: bool = True) -> int:
     if overrides:
         formatted = ", ".join(f"{key}={value}" for key, value in sorted(overrides.items()))
         print(f"Using local overrides: {formatted}")
+
+    runtime_error = prepare_native_stt(profile, environment)
+    if runtime_error:
+        print(f"\nCannot start yet:\n  - {runtime_error}")
+        return 1
 
     blockers = preflight(profile, environment)
     if blockers:

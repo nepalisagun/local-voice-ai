@@ -46,6 +46,19 @@ def _jetson_profile(*, jetpack: str = "6.2.1", l4t: str = "36.4.3"):
     return resolve_profile(load_catalog(DEFAULT_CATALOG_PATH), hardware, requested="compact")
 
 
+def _apple_profile():
+    hardware = HardwareInfo(
+        system="Darwin",
+        machine="arm64",
+        platform_key="apple-silicon",
+        device_name="Apple M-series",
+        accelerator="mps",
+        memory_topology="shared",
+        total_memory_gib=16.0,
+    )
+    return resolve_profile(load_catalog(DEFAULT_CATALOG_PATH), hardware, requested="compact")
+
+
 def test_runtime_environment_precedence() -> None:
     profile = _cuda_profile()
 
@@ -100,6 +113,16 @@ def test_compose_injects_optional_machine_overrides_into_the_container() -> None
 
     assert "path: .env.local" in compose
     assert "required: false" in compose
+
+
+def test_generic_image_packages_native_nemotron_for_cpu_and_cuda() -> None:
+    dockerfile = (run_launcher.ROOT / "Dockerfile").read_text(encoding="utf-8")
+    cpu_compose = (run_launcher.ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    gpu_compose = (run_launcher.ROOT / "docker-compose.gpu.yml").read_text(encoding="utf-8")
+
+    assert "python -m local_voice_ai.native_runtime" in dockerfile
+    assert "NEMO_SPEECH_BACKEND: ${NEMO_SPEECH_BACKEND:-cpu}" in cpu_compose
+    assert "NEMO_SPEECH_BACKEND: ${NEMO_SPEECH_BACKEND:-cuda}" in gpu_compose
 
 
 def test_supported_jetson_release_and_nvidia_runtime_pass_preflight_check() -> None:
@@ -211,6 +234,63 @@ def test_saved_budget_only_persists_a_manual_override() -> None:
 
 def test_current_python_is_supported_for_native_runtime() -> None:
     assert run_launcher._native_python_version_error(Path(sys.executable)) is None
+
+
+def test_native_start_installs_the_matching_nemotron_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    binary = tmp_path / "nemo-speech" / "bin" / "nemo-speech"
+    binary.parent.mkdir(parents=True)
+    binary.touch()
+    calls: list[dict[str, object]] = []
+
+    def fake_install(cache_dir: Path, **kwargs):
+        calls.append({"cache_dir": cache_dir, **kwargs})
+        return binary
+
+    monkeypatch.setattr(run_launcher, "install_runtime", fake_install)
+    monkeypatch.setattr(run_launcher.shutil, "which", lambda *_args, **_kwargs: None)
+    environment = {"STT_PROVIDER": "nemotron-cpp", "PATH": "/usr/bin"}
+
+    error = run_launcher.prepare_native_stt(_apple_profile(), environment)
+
+    assert error is None
+    assert calls == [
+        {
+            "cache_dir": run_launcher.NATIVE_RUNTIME_DIR,
+            "system": "Darwin",
+            "machine": "arm64",
+            "backend": "mps",
+        }
+    ]
+    assert environment["NEMO_SPEECH_BIN"] == str(binary)
+    assert environment["PATH"].startswith(str(binary.parent))
+
+
+def test_native_start_honors_an_explicit_nemotron_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configured = "/custom/bin/nemo-speech"
+    monkeypatch.setattr(
+        run_launcher.shutil,
+        "which",
+        lambda binary, **_kwargs: configured if binary == configured else None,
+    )
+    monkeypatch.setattr(
+        run_launcher,
+        "install_runtime",
+        lambda *_args, **_kwargs: pytest.fail("the managed runtime must not install"),
+    )
+    environment = {
+        "STT_PROVIDER": "nemotron-cpp",
+        "NEMO_SPEECH_BIN": configured,
+    }
+
+    error = run_launcher.prepare_native_stt(_apple_profile(), environment)
+
+    assert error is None
+    assert environment["NEMO_SPEECH_BIN"] == configured
 
 
 def test_noninteractive_configure_saves_the_explicit_choice(
