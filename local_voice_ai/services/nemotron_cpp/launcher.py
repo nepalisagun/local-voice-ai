@@ -135,6 +135,37 @@ def server_argv(
     ]
 
 
+def resolve_binary() -> str:
+    """Find the nemo-speech binary, or explain how to install it.
+
+    ``run.py`` installs the runtime under ``.local-voice-ai/runtime`` and hands
+    the path down as NEMO_SPEECH_BIN. Running the supervisor directly skips
+    that, and an unset variable used to reach execvp as a bare "nemo-speech"
+    and die with a bare ENOENT, so look in the install directory too.
+    """
+    configured = os.getenv("NEMO_SPEECH_BIN")
+    if configured:
+        found = shutil.which(configured) or (configured if Path(configured).is_file() else None)
+        if found is None:
+            raise SystemExit(f"NEMO_SPEECH_BIN was set but not found: {configured}")
+        return found
+
+    on_path = shutil.which("nemo-speech")
+    if on_path:
+        return on_path
+
+    installed = sorted(Path(".local-voice-ai/runtime").glob("*/bin/nemo-speech"))
+    if installed:
+        return str(installed[-1].resolve())
+
+    raise SystemExit(
+        "the native speech runtime (nemo-speech) is not installed. Run "
+        "`python run.py start` to install it, or set NEMO_SPEECH_BIN to an "
+        "existing binary. To use the Python speech service instead, set "
+        "STT_PROVIDER=nemotron."
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Launch native streaming Nemotron Speech")
     parser.add_argument("--host", default="127.0.0.1")
@@ -168,7 +199,7 @@ def main(argv: list[str] | None = None) -> int:
         port=args.port,
         right_context=args.right_context,
         gpu=gpu,
-        binary=os.getenv("NEMO_SPEECH_BIN", "nemo-speech"),
+        binary=resolve_binary(),
     )
     logger.info("starting NeMo-Speech.cpp")
     os.execvp(command[0], command)

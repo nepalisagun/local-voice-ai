@@ -11,6 +11,7 @@ at a remote endpoint automatically disables the local child.
 
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from urllib.parse import urlparse
@@ -62,6 +63,25 @@ def _is_loopback(url: str) -> bool:
     return host in {"", "localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 
+def _literal_ip(url: str) -> str:
+    """The literal IP address in ``url``, or "" when it has none.
+
+    LiveKit's ``--node-ip`` needs an address rather than a name, so a DNS
+    hostname yields "" and leaves LIVEKIT_NODE_IP to supply the address.
+    """
+    if not url:
+        return ""
+    try:
+        host = urlparse(url).hostname or ""
+    except ValueError:
+        return ""
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return ""
+    return host
+
+
 @dataclass
 class Config:
     # --- Web (FastAPI in the supervisor process) -------------------------
@@ -79,7 +99,15 @@ class Config:
     gateway: bool = False
 
     # --- LiveKit ---------------------------------------------------------
+    # Where this process and the agent reach LiveKit. It also decides whether
+    # the supervisor runs its own server (see manage_livekit), so it should
+    # stay on loopback whenever the managed dev server is wanted.
     livekit_url: str = "ws://127.0.0.1:7880"
+    # Where browsers are told to connect, when that differs — a LAN address for
+    # remote clients, say. Empty means "same as livekit_url". Keeping this
+    # separate matters: overloading livekit_url for the advertised address used
+    # to switch the managed server off as a side effect.
+    livekit_public_url: str = ""
     livekit_api_key: str = "devkey"
     livekit_api_secret: str = "secret"
     livekit_bind_port: int = 7880
@@ -181,6 +209,7 @@ class Config:
         # have no auth — only widen this on a network you trust.
         bind_host = os.getenv("BIND_HOST", _DEFAULT_BIND_HOST)
         livekit_url = os.getenv("LIVEKIT_URL", cls.livekit_url)
+        livekit_public_url = os.getenv("LIVEKIT_PUBLIC_URL", cls.livekit_public_url)
         llama_base_url = os.getenv("LLAMA_BASE_URL", cls.llama_base_url)
         stt_base_url = os.getenv("STT_BASE_URL")
         tts_base_url = os.getenv("TTS_BASE_URL", cls.tts_base_url)
@@ -203,12 +232,18 @@ class Config:
             gateway=_env_bool("GATEWAY", cls.gateway),
             #
             livekit_url=livekit_url,
+            livekit_public_url=livekit_public_url,
             livekit_api_key=os.getenv("LIVEKIT_API_KEY", cls.livekit_api_key),
             livekit_api_secret=os.getenv("LIVEKIT_API_SECRET", cls.livekit_api_secret),
             livekit_bind_port=int(os.getenv("LIVEKIT_BIND_PORT", str(cls.livekit_bind_port))),
             livekit_rtc_port=int(os.getenv("LIVEKIT_RTC_PORT", str(cls.livekit_rtc_port))),
             livekit_udp_port=int(os.getenv("LIVEKIT_UDP_PORT", str(cls.livekit_udp_port))),
-            livekit_node_ip=os.getenv("LIVEKIT_NODE_IP", cls.livekit_node_ip),
+            # ICE candidates must carry an address the browser can reach, so
+            # default it to the advertised host instead of making a LAN setup
+            # remember a second variable.
+            livekit_node_ip=os.getenv("LIVEKIT_NODE_IP")
+            or _literal_ip(livekit_public_url or livekit_url)
+            or cls.livekit_node_ip,
             manage_livekit=_env_bool("MANAGE_LIVEKIT", _is_loopback(livekit_url)),
             #
             llama_base_url=llama_base_url,
@@ -260,6 +295,11 @@ class Config:
             sequential_startup=_env_bool("SEQUENTIAL_STARTUP", cls.sequential_startup),
             log_level=os.getenv("LOG_LEVEL", cls.log_level).upper(),
         )
+
+    @property
+    def advertised_livekit_url(self) -> str:
+        """The LiveKit address to hand to browsers."""
+        return self.livekit_public_url or self.livekit_url
 
     def agent_env(self) -> dict[str, str]:
         """Environment variables to pass to the agent worker subprocess."""

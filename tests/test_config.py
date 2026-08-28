@@ -264,3 +264,40 @@ class TestAgentEnv:
             "TURN_DETECTION",
         ):
             assert required in env, f"agent_env missing {required}"
+
+
+class TestAdvertisedLiveKitUrl:
+    """LIVEKIT_PUBLIC_URL separates what browsers are told from what we manage.
+
+    Before it existed, pointing LIVEKIT_URL at a LAN address to reach remote
+    clients also turned the managed server off, and the stack reported itself
+    ready with nothing listening.
+    """
+
+    def test_defaults_to_the_internal_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("LIVEKIT_PUBLIC_URL", raising=False)
+        cfg = Config.from_env()
+        assert cfg.advertised_livekit_url == cfg.livekit_url
+
+    def test_public_url_does_not_disable_management(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LIVEKIT_URL", "ws://127.0.0.1:7880")
+        monkeypatch.setenv("LIVEKIT_PUBLIC_URL", "ws://192.168.1.40:7880")
+        cfg = Config.from_env()
+        assert cfg.advertised_livekit_url == "ws://192.168.1.40:7880"
+        assert cfg.manage_livekit is True
+
+    def test_node_ip_follows_the_public_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("LIVEKIT_NODE_IP", raising=False)
+        monkeypatch.setenv("LIVEKIT_PUBLIC_URL", "ws://192.168.1.40:7880")
+        assert Config.from_env().livekit_node_ip == "192.168.1.40"
+
+    def test_explicit_node_ip_still_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LIVEKIT_PUBLIC_URL", "ws://192.168.1.40:7880")
+        monkeypatch.setenv("LIVEKIT_NODE_IP", "10.0.0.9")
+        assert Config.from_env().livekit_node_ip == "10.0.0.9"
+
+    def test_hostname_leaves_node_ip_alone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # --node-ip needs an address, so a DNS name must not be passed through.
+        monkeypatch.delenv("LIVEKIT_NODE_IP", raising=False)
+        monkeypatch.setenv("LIVEKIT_PUBLIC_URL", "ws://voice.example.com:7880")
+        assert Config.from_env().livekit_node_ip == "127.0.0.1"

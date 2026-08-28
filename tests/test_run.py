@@ -308,3 +308,28 @@ def test_noninteractive_configure_saves_the_explicit_choice(
     assert selection is not None
     assert selection.profile == "compact"
     assert selection.memory_budget_gib == 5.5
+
+
+class TestDockerFailureReason:
+    """A daemon that refuses this user is not a daemon that is down."""
+
+    def test_permission_denied_names_the_group(self) -> None:
+        stderr = (
+            "permission denied while trying to connect to the Docker daemon "
+            "socket at unix:///var/run/docker.sock"
+        )
+        message = run_launcher._docker_failure_reason(stderr)
+        assert "docker' group" in message
+        assert "not running" not in message
+
+    def test_stopped_daemon_says_so(self) -> None:
+        stderr = "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?"
+        assert "not running" in run_launcher._docker_failure_reason(stderr)
+
+    def test_unknown_failure_falls_back(self) -> None:
+        assert run_launcher._docker_failure_reason("something else") == (
+            "the Docker daemon is not reachable"
+        )
+
+    def test_empty_stderr_falls_back(self) -> None:
+        assert run_launcher._docker_failure_reason("") == "the Docker daemon is not reachable"

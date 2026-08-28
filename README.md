@@ -285,6 +285,28 @@ Start the application:
 .venv/bin/python -m local_voice_ai serve
 ```
 
+This reads `.env.local`, then the saved profile in `.local-voice-ai.toml`, then
+`.env`, so it starts with the same settings `python3 run.py` would use.
+
+### Serve it to other computers
+
+`serve` binds the web port to every interface, but it tells browsers to connect
+to LiveKit on loopback, which no other machine can reach. Name the address they
+should use instead:
+
+```bash
+# .env.local
+LIVEKIT_PUBLIC_URL=ws://192.168.1.40:7880
+```
+
+That is the only variable needed: the ICE address follows it, and LiveKit is
+still started here because `LIVEKIT_URL` remains on loopback. Set `LIVEKIT_URL`
+itself only to use a LiveKit you run elsewhere, such as LiveKit Cloud.
+
+`serve` does not host the web interface, so connect from the other computer
+with `python3 run.py client --server 192.168.1.40`, which needs Node.js and
+pnpm there but not Docker.
+
 If you change the frontend, start its development server in another terminal:
 
 ```bash

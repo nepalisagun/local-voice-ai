@@ -349,6 +349,25 @@ def _matches_release(version: str, supported: Sequence[str]) -> bool:
     return any(version == release or version.startswith(release + ".") for release in supported)
 
 
+def _docker_failure_reason(stderr: str) -> str:
+    """Explain why ``docker info`` failed, in terms of what to fix.
+
+    A running daemon that refuses this user looks identical to a stopped one
+    unless the message is read, and "the daemon is not reachable" sends people
+    off restarting a service that was never down.
+    """
+    lowered = (stderr or "").lower()
+    if "permission denied" in lowered:
+        return (
+            "Docker is running but this user cannot reach it. Add yourself to "
+            "the 'docker' group (sudo usermod -aG docker $USER), then log out "
+            "and back in"
+        )
+    if "is the docker daemon running" in lowered or "cannot connect" in lowered:
+        return "the Docker daemon is not running. Start it (sudo systemctl start docker)"
+    return "the Docker daemon is not reachable"
+
+
 def _docker_runtime_names(raw: str) -> set[str]:
     try:
         runtimes = json.loads(raw)
@@ -433,7 +452,7 @@ def preflight(profile: ResolvedProfile, environment: Mapping[str, str]) -> list[
             errors.append("Docker did not respond within 15 seconds")
         else:
             if docker_info.returncode != 0:
-                errors.append("the Docker daemon is not reachable")
+                errors.append(_docker_failure_reason(docker_info.stderr))
             elif profile.hardware.platform_key.startswith("jetson"):
                 errors.extend(
                     jetson_container_errors(

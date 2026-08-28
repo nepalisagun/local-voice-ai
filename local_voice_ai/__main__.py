@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 from .api import build_app
 from .config import Config, probe_host
+from .profiles import detect_hardware, load_catalog, load_selection, resolve_profile
 from .supervisor import ChildSpec, Supervisor, configure_logging
 
 logger = logging.getLogger("main")
@@ -519,6 +520,35 @@ def _download_models(cfg: Config) -> int:
     return 0
 
 
+def _apply_profile_defaults(path: Path = Path(".local-voice-ai.toml")) -> None:
+    """Apply the saved hardware profile's settings, where nothing set them.
+
+    ``run.py`` resolves a profile and passes its environment to the stack it
+    starts. Running ``python -m local_voice_ai serve`` directly has no such
+    caller, so every profile setting quietly fell back to the ``Config``
+    default — a profile promising a 16K context would serve 4K, for one.
+
+    A missing or unreadable selection file is not an error: it just means
+    there is nothing to apply. Under Docker the file is excluded from the
+    image, so this returns before touching the hardware probe.
+    """
+    try:
+        selection = load_selection(path)
+        if selection is None:
+            return
+        profile = resolve_profile(
+            load_catalog(),
+            detect_hardware(),
+            requested=selection.profile,
+            memory_budget_gib=selection.memory_budget_gib,
+        )
+    except (OSError, ValueError) as exc:
+        logger.warning("ignoring the saved profile in %s: %s", path, exc)
+        return
+    for key, value in profile.environment.items():
+        os.environ.setdefault(key, value)
+
+
 def _load_env_files() -> None:
     """Load ``.env.local`` then ``.env`` into the environment.
 
@@ -526,16 +556,21 @@ def _load_env_files() -> None:
     On a bare-metal run nothing read them at all, so the documented settings
     silently did nothing unless you exported them by hand.
 
-    Precedence is real env > ``.env.local`` > ``.env``: ``override=False`` means
-    the first value wins, so an explicit ``FOO=bar python -m ...`` still beats
-    both files, and ``.env.local`` (untracked, per-machine) beats the committed
-    defaults. Values reach the children through the inherited environment, so
-    llama.cpp's own ``LLAMA_ARG_*`` vars work here too.
+    Precedence is real env > ``.env.local`` > saved profile > ``.env``:
+    ``override=False`` means the first value wins, so an explicit
+    ``FOO=bar python -m ...`` still beats every file, and ``.env.local``
+    (untracked, per-machine) beats the committed defaults. Values reach the
+    children through the inherited environment, so llama.cpp's own
+    ``LLAMA_ARG_*`` vars work here too.
+
+    The profile sits above ``.env`` because it is chosen for this machine's
+    hardware, while ``.env`` only carries repository-wide fallbacks.
     """
-    for name in (".env.local", ".env"):
-        path = Path(name)
-        if path.is_file():
-            load_dotenv(path, override=False)
+    if Path(".env.local").is_file():
+        load_dotenv(Path(".env.local"), override=False)
+    _apply_profile_defaults()
+    if Path(".env").is_file():
+        load_dotenv(Path(".env"), override=False)
 
 
 def main(argv: list[str] | None = None) -> int:
